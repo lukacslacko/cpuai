@@ -1,0 +1,5 @@
+Assembled examples/fibonacci.asm -> examples/fibonacci.bin (88 bytes)
+
+Labels:
+  __while_1            = 0x001C
+  __endwhile_2         = 0x0057

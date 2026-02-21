@@ -548,32 +548,47 @@ class Compiler:
         label = self.functions[node.name]
         self.emit_label(label)
 
-        # Save old variable scope for params
+        # Calling convention for Structural emulator:
+        # A and B hold the return address! We must push them FIRST before doing anything else.
+        self.emit(f"    PUSH A          ; save ret high")
+        self.emit(f"    PUSH B          ; save ret low")
+
         old_func = self.current_func
         self.current_func = node.name
 
-        # Calling convention: first arg in A, extra args in __arg1, __arg2, etc.
-        if len(node.params) > 0:
-            # First param comes in A register
-            addr = self.alloc_var(node.params[0])
-            self.emit(f"    STA [0x{addr:04X}]    ; param {node.params[0]}")
+        # Allocate variables in RAM as usual?
+        # Actually, variables could be on the stack, but the existing compiler allocates them sequentially in RAM.
+        # We'll leave local variables allocated in RAM (static allocation) for simplicity,
+        # but function arguments come from the stack.
+        # Arguments were pushed by caller. 
+        # Stack structure upon entry before our push:
+        # SP+0: arg N
+        # ...
+        # SP+(N-1): arg 1
+        # Now we pushed A and B:
+        # SP+0: B (ret_lo)
+        # SP+1: A (ret_hi)
+        # SP+2: arg N
+        # ...
+        # To load arg i (0-indexed, 0 is first arg): it's at offset 2 + (N - i).
 
-        if len(node.params) > 1:
-            # Extra params were stored by caller in __arg slots
-            for i, p in enumerate(node.params[1:]):
-                arg_name = f"__arg{i+1}"
-                if arg_name not in self.variables:
-                    self.alloc_var(arg_name)
-                src_addr = self.var_addr(arg_name)
-                addr = self.alloc_var(p)
-                self.emit(f"    LDA [0x{src_addr:04X}]    ; load arg {p}")
-                self.emit(f"    STA [0x{addr:04X}]    ; param {p}")
+        N = len(node.params)
+        for i, param in enumerate(node.params):
+            val_offset = 2 + (N - i)
+            addr = self.alloc_var(param)
+            self.emit(f"    LSA {val_offset}            ; load arg {param}")
+            self.emit(f"    STA [0x{addr:04X}]    ; param {param}")
 
         # Compile body
         for stmt in node.body.stmts:
             self.compile_stmt(stmt)
 
-        # Default return
+        # Default return path (used if no return stmt is hit)
+        self.emit("    POP C           ; restore ret low")
+        self.emit("    POP D           ; restore ret high")
+        # Pop args from caller (by discarding them? No, caller cleans up args? 
+        # Let's say callee doesn't clean up args, or caller cleans up.
+        # Actually, a standard C calling convention has caller clean up.
         self.emit("    RET")
         self.emit("")
         self.current_func = old_func
@@ -605,6 +620,8 @@ class Compiler:
         elif isinstance(node, ReturnStmt):
             if node.expr:
                 self.compile_expr(node.expr)
+            self.emit("    POP C           ; restore ret low")
+            self.emit("    POP D           ; restore ret high")
             self.emit("    RET")
 
         elif isinstance(node, Block):
@@ -713,10 +730,10 @@ class Compiler:
             # move to B, pop left into A, then operate.
             if node.op in ('+', '-', '&', '|', '^'):
                 self.compile_expr(node.left)
-                self.emit("    PSA             ; save left")
+                self.emit("    PUSH A          ; save left")
                 self.compile_expr(node.right)
                 self.emit("    MVB             ; B = right")
-                self.emit("    PPA             ; A = left")
+                self.emit("    POP A           ; A = left")
 
                 op_map = {
                     '+': 'ADD', '-': 'SUB',
@@ -748,22 +765,30 @@ class Compiler:
         if node.name not in self.functions:
             raise CompileError(f"Undefined function: {node.name}")
 
-        # Store extra args to __arg slots (avoids stack/return-address conflicts)
-        if len(node.args) > 1:
-            for i, arg in enumerate(node.args[1:]):
-                self.compile_expr(arg)
-                arg_name = f"__arg{i+1}"
-                if arg_name not in self.variables:
-                    self.alloc_var(arg_name)
-                addr = self.var_addr(arg_name)
-                self.emit(f"    STA [0x{addr:04X}]    ; pass arg {i+1}")
-
-        # First arg in A
-        if node.args:
-            self.compile_expr(node.args[0])
+        # Evaluate arguments left-to-right (or right-to-left, doesn't matter for C but left-to-right is fine)
+        # We push each evaluated argument onto the stack.
+        for arg in node.args:
+            self.compile_expr(arg)
+            self.emit("    PUSH A          ; push arg")
 
         label = self.functions[node.name]
         self.emit(f"    CAL {label}")
+        
+        # Caller cleans up stack: SP += len(node.args)
+        # We don't have ADD SP, imm. 
+        # But wait, does structural emulator SP have ADD? No. SP is 193 counters.
+        # We must POP into A or B and discard!
+        # Actually POP A / POP B will do SP++.
+        if len(node.args) > 0:
+            self.emit(f"    ; caller cleans up stack ({len(node.args)} args)")
+            # Wait, popping into A or B will clobber the function's return value (which is in A)!
+            # So if we want to preserve A (the return value), we can only POP into B, or push A then pop discard then pop A.
+            # But we can just POP B! (Unless >1 args, then we just POP B repeatedly).
+            # We have POP B.
+            self.emit("    PUSH A          ; temporarily save return val")
+            for _ in range(len(node.args)):
+                self.emit("    POP B           ; discard arg")
+            self.emit("    POP A           ; restore return val")
 
 
 # ---------------------------------------------------------------------------

@@ -31,39 +31,44 @@ import re
 # operand_type: None, 'imm', 'addr_mem', 'addr_jump'
 OPCODES = {
     'NOP': (0x00, None),
-    'LDA': None,  # Multiple variants, handled specially
-    'STA': (0x03, 'addr_mem'),
-    'LDB': None,  # Multiple variants
-    'STB': (0x06, 'addr_mem'),
-    'MVA': (0x07, None),  # MOV A,B
-    'MVB': (0x08, None),  # MOV B,A
-    'ADD': (0x10, None),
-    'SUB': (0x11, None),
-    'AND': (0x12, None),
-    'OR':  (0x13, None),
-    'XOR': (0x14, None),
-    'NOT': (0x15, None),
-    'SHL': (0x16, None),
-    'SHR': (0x17, None),
-    'ADI': (0x18, 'imm'),
-    'SBI': (0x19, 'imm'),
-    'CMP': (0x1A, None),
-    'CMI': (0x1B, 'imm'),
-    'PSA': (0x20, None),  # PUSH A
-    'PPA': (0x21, None),  # POP A
-    'PSB': (0x22, None),  # PUSH B
-    'PPB': (0x23, None),  # POP B
-    'JMP': (0x30, 'addr_jump'),
-    'JZ':  (0x40, 'addr_jump'),
-    'JNZ': (0x50, 'addr_jump'),
-    'JC':  (0x60, 'addr_jump'),
-    'JNC': (0x70, 'addr_jump'),
-    'JN':  (0x80, 'addr_jump'),
-    'CAL': (0x90, 'addr_jump'),
-    'RET': (0xA0, None),
-    'IN':  (0xFD, None),
-    'OUT': (0xFE, None),
-    'HLT': (0xFF, None),
+    'LDA': None,  # Handled specially
+    'LDB': None,  
+    'LDC': None,  
+    'LDD': None,  
+    'STA': (0x06, 'addr_mem'),
+    'STB': (0x08, 'addr_mem'),
+    'MVA': None,  
+    'MVB': (0x1B, None),
+    'MVC': (0x1C, None),
+    'MVD': (0x1D, None),
+    'ADD': (0x20, None),
+    'SUB': (0x21, None),
+    'AND': (0x22, None),
+    'OR':  (0x23, None),
+    'XOR': (0x24, None),
+    'NOT': (0x25, None),
+    'SHL': (0x26, None),
+    'SHR': (0x27, None),
+    'CMP': (0x28, None),
+    'PSA': (0x30, None),  # PUSH A
+    'PPA': (0x40, None),  # POP A
+    'PSB': (0x50, None),  # PUSH B
+    'PPB': (0x60, None),  # POP B
+    'LSA': None,  # Handled specially (0xC0-0xCF)
+    'SSA': None,  # Handled specially (0xD0-0xDF)
+    'LSB': None,  # Handled specially (0xE0-0xEF)
+    'SSB': None,  # Handled specially (0xF0-0xFF)
+    'JMP': (0x70, 'addr_jump'),
+    'JZ':  (0x71, 'addr_jump'),
+    'JNZ': (0x72, 'addr_jump'),
+    'JC':  (0x73, 'addr_jump'),
+    'JNC': (0x74, 'addr_jump'),
+    'JN':  (0x75, 'addr_jump'),
+    'CAL': (0x80, 'addr_jump'),
+    'RET': (0x81, None),
+    'HLT': (0x82, None),
+    'IN':  (0x83, None),
+    'OUT': (0x84, None),
 }
 
 # Aliases
@@ -184,13 +189,11 @@ class Assembler:
             if operand is None:
                 raise AssemblerError("LDA requires an operand", line_num)
             if operand.startswith('#'):
-                # LDA #imm
                 val = self.resolve_value(operand[1:], line_num) if pass_num == 2 else 0
                 return 0x01, [val & 0xFF]
             elif operand.startswith('[') and operand.endswith(']'):
-                # LDA [addr16]
                 val = self.resolve_value(operand[1:-1], line_num) if pass_num == 2 else 0
-                return 0x02, [val & 0xFF, (val >> 8) & 0xFF]
+                return 0x05, [val & 0xFF, (val >> 8) & 0xFF] # LDA [addr16]
             else:
                 raise AssemblerError(f"Invalid LDA operand: {operand}", line_num)
 
@@ -200,39 +203,77 @@ class Assembler:
                 raise AssemblerError("LDB requires an operand", line_num)
             if operand.startswith('#'):
                 val = self.resolve_value(operand[1:], line_num) if pass_num == 2 else 0
-                return 0x04, [val & 0xFF]
+                return 0x02, [val & 0xFF]
             elif operand.startswith('[') and operand.endswith(']'):
                 val = self.resolve_value(operand[1:-1], line_num) if pass_num == 2 else 0
-                return 0x05, [val & 0xFF, (val >> 8) & 0xFF]
+                return 0x07, [val & 0xFF, (val >> 8) & 0xFF] # LDB [addr16]
             else:
                 raise AssemblerError(f"Invalid LDB operand: {operand}", line_num)
+                
+        # Handle LDC, LDD
+        if mnemonic in ('LDC', 'LDD'):
+            if operand is None or not operand.startswith('#'):
+                raise AssemblerError(f"{mnemonic} requires an immediate operand (#)", line_num)
+            val = self.resolve_value(operand[1:], line_num) if pass_num == 2 else 0
+            base = 0x03 if mnemonic == 'LDC' else 0x04
+            return base, [val & 0xFF]
+            
+        # Handle LSA, SSA, LSB, SSB
+        if mnemonic in ('LSA', 'SSA', 'LSB', 'SSB'):
+            if operand is None:
+                raise AssemblerError(f"{mnemonic} requires an offset 0-15", line_num)
+            val = self.resolve_value(operand, line_num) if pass_num == 2 else 0
+            if pass_num == 2 and (val < 0 or val > 15):
+                raise AssemblerError(f"{mnemonic} offset must be 0-15 (got {val})", line_num)
+            base = {'LSA': 0xC0, 'SSA': 0xD0, 'LSB': 0xE0, 'SSB': 0xF0}[mnemonic]
+            return base + (val & 0x0F), []
 
         # Handle PUSH/POP aliases
         if mnemonic == 'PUSH':
             if operand and operand.upper() == 'A':
-                return 0x20, []
+                return 0x30, []
             elif operand and operand.upper() == 'B':
-                return 0x22, []
+                return 0x50, []
+            elif operand and operand.upper() == 'C':
+                return 0x90, []
+            elif operand and operand.upper() == 'D':
+                return 0xB0, []
             else:
-                raise AssemblerError("PUSH requires A or B", line_num)
+                raise AssemblerError("PUSH requires A, B, C, or D", line_num)
 
         if mnemonic == 'POP':
             if operand and operand.upper() == 'A':
-                return 0x21, []
+                return 0x40, []
             elif operand and operand.upper() == 'B':
-                return 0x23, []
+                return 0x60, []
+            elif operand and operand.upper() == 'C':
+                return 0xA0, []
+            elif operand and operand.upper() == 'D':
+                return 0x10, []
             else:
-                raise AssemblerError("POP requires A or B", line_num)
+                raise AssemblerError("POP requires A, B, C, or D", line_num)
+
+        # Handle MVA
+        if mnemonic == 'MVA':
+            if operand is None:
+                 raise AssemblerError("MVA requires an operand (B, C, or D)", line_num)
+            op = operand.strip().upper()
+            if op == 'B': return 0x18, []
+            elif op == 'C': return 0x19, []
+            elif op == 'D': return 0x1A, []
+            else: raise AssemblerError(f"Invalid MVA source: {op}", line_num)
 
         # Handle MOV alias
         if mnemonic == 'MOV':
             if operand:
                 parts = [p.strip().upper() for p in operand.split(',')]
-                if parts == ['A', 'B']:
-                    return 0x07, []
-                elif parts == ['B', 'A']:
-                    return 0x08, []
-            raise AssemblerError("MOV requires A,B or B,A", line_num)
+                if len(parts) == 2:
+                    src, dst = parts[1], parts[0]
+                    if dst == 'A' and src in ('B', 'C', 'D'):
+                        return {'B': 0x18, 'C': 0x19, 'D': 0x1A}[src], []
+                    elif src == 'A' and dst in ('B', 'C', 'D'):
+                        return {'B': 0x1B, 'C': 0x1C, 'D': 0x1D}[dst], []
+            raise AssemblerError("MOV requires A,reg or reg,A (reg=B,C,D)", line_num)
 
         # Look up in opcode table
         if mnemonic == 'CALL':

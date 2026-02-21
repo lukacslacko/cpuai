@@ -24,10 +24,10 @@ __while_1:
     JC __endwhile_2
     JZ __endwhile_2
     LDA [0x8000]    ; prev
-    PSA             ; save left
+    PUSH A          ; save left
     LDA [0x8001]    ; curr
     MVB             ; B = right
-    PPA             ; A = left
+    POP A           ; A = left
     ADD
     STA [0x8002]    ; next
     LDA [0x8002]    ; next
@@ -37,10 +37,10 @@ __while_1:
     LDA [0x8002]    ; next
     STA [0x8001]    ; curr
     LDA [0x8003]    ; count
-    PSA             ; save left
+    PUSH A          ; save left
     LDA #1
     MVB             ; B = right
-    PPA             ; A = left
+    POP A           ; A = left
     SUB
     STA [0x8003]    ; count
     JMP __while_1

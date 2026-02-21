@@ -6,10 +6,16 @@
     STA [0x8000]    ; x
     LDA #6
     STA [0x8001]    ; y
-    LDA [0x8001]    ; y
-    STA [0x8003]    ; pass arg 1
     LDA [0x8000]    ; x
+    PUSH A          ; push arg
+    LDA [0x8001]    ; y
+    PUSH A          ; push arg
     CAL __fn_multiply
+    ; caller cleans up stack (2 args)
+    PUSH A          ; temporarily save return val
+    POP B           ; discard arg
+    POP B           ; discard arg
+    POP A           ; restore return val
     STA [0x8002]    ; product
     LDA [0x8002]    ; product
     OUT
@@ -17,13 +23,16 @@
 
 ; --- function multiply ---
 __fn_multiply:
-    STA [0x8004]    ; param a
-    LDA [0x8003]    ; load arg b
-    STA [0x8005]    ; param b
+    PUSH A          ; save ret high
+    PUSH B          ; save ret low
+    LSA 4            ; load arg a
+    STA [0x8003]    ; param a
+    LSA 3            ; load arg b
+    STA [0x8004]    ; param b
     LDA #0
-    STA [0x8006]    ; result
+    STA [0x8005]    ; result
 __while_1:
-    LDA [0x8005]    ; b
+    LDA [0x8004]    ; b
     PSA             ; save left
     LDA #0
     MVB             ; B = right
@@ -31,23 +40,27 @@ __while_1:
     CMP             ; flags = A - B
     JC __endwhile_2
     JZ __endwhile_2
-    LDA [0x8006]    ; result
-    PSA             ; save left
-    LDA [0x8004]    ; a
+    LDA [0x8005]    ; result
+    PUSH A          ; save left
+    LDA [0x8003]    ; a
     MVB             ; B = right
-    PPA             ; A = left
+    POP A           ; A = left
     ADD
-    STA [0x8006]    ; result
-    LDA [0x8005]    ; b
-    PSA             ; save left
+    STA [0x8005]    ; result
+    LDA [0x8004]    ; b
+    PUSH A          ; save left
     LDA #1
     MVB             ; B = right
-    PPA             ; A = left
+    POP A           ; A = left
     SUB
-    STA [0x8005]    ; b
+    STA [0x8004]    ; b
     JMP __while_1
 __endwhile_2:
-    LDA [0x8006]    ; result
+    LDA [0x8005]    ; result
+    POP C           ; restore ret low
+    POP D           ; restore ret high
     RET
+    POP C           ; restore ret low
+    POP D           ; restore ret high
     RET
 
