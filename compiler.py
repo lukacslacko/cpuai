@@ -65,6 +65,8 @@ class TokenType(Enum):
     KW_RETURN = auto()
     KW_OUT = auto()
     KW_IN = auto()
+    KW_ASM = auto()
+    STRING = auto()
     EOF = auto()
 
 
@@ -77,6 +79,7 @@ KEYWORDS = {
     'return': TokenType.KW_RETURN,
     'out': TokenType.KW_OUT,
     'in': TokenType.KW_IN,
+    'asm': TokenType.KW_ASM,
 }
 
 
@@ -130,6 +133,21 @@ def tokenize(source):
                 while i < len(source) and source[i].isdigit():
                     i += 1
             tokens.append(Token(TokenType.NUM, int(source[start:i], 0), line))
+            continue
+
+        # Strings
+        if ch == '"':
+            start = i + 1
+            i += 1
+            while i < len(source) and source[i] != '"':
+                if source[i] == '\n':
+                    line += 1
+                i += 1
+            if i >= len(source):
+                raise LexerError(f"Line {line}: Unterminated string literal")
+            val = source[start:i]
+            tokens.append(Token(TokenType.STRING, val, line))
+            i += 1
             continue
 
         # Identifiers / keywords
@@ -208,6 +226,10 @@ class BinOp(ASTNode):
 
 class InExpr(ASTNode):
     pass
+
+class AsmStmt(ASTNode):
+    def __init__(self, asm_code):
+        self.asm_code = asm_code
 
 class VarDecl(ASTNode):
     def __init__(self, name, init_expr):
@@ -331,6 +353,8 @@ class Parser:
             return self.parse_return()
         elif tt == TokenType.KW_OUT:
             return self.parse_out()
+        elif tt == TokenType.KW_ASM:
+            return self.parse_asm_stmt()
         elif tt == TokenType.IDENT:
             # Could be assignment or call statement
             name = self.advance()
@@ -340,6 +364,7 @@ class Parser:
                 self.expect(TokenType.SEMI)
                 return Assignment(name.value, expr)
             elif self.peek().type == TokenType.LPAREN:
+                # Function call as a statement
                 self.advance()
                 args = []
                 if self.peek().type != TokenType.RPAREN:
@@ -348,11 +373,12 @@ class Parser:
                         args.append(self.parse_expr())
                 self.expect(TokenType.RPAREN)
                 self.expect(TokenType.SEMI)
-                return OutStmt(CallExpr(name.value, args))  # Expression statement
+                return OutStmt(CallExpr(name.value, args))  # Wrap in OutStmt for now, or create a new ExprStmt
             else:
                 raise ParseError(f"Line {name.line}: Expected '=' or '(' after identifier")
         else:
-            raise ParseError(f"Line {self.peek().line}: Unexpected token {tt}")
+            # Any other expression followed by a semicolon is an expression statement
+            return self.parse_expr_stmt()
 
     def parse_var_decl(self):
         self.expect(TokenType.KW_VAR)
@@ -399,6 +425,22 @@ class Parser:
         self.expect(TokenType.RPAREN)
         self.expect(TokenType.SEMI)
         return OutStmt(expr)
+
+    def parse_asm_stmt(self):
+        self.expect(TokenType.KW_ASM)
+        self.expect(TokenType.LPAREN)
+        str_token = self.expect(TokenType.STRING)
+        self.expect(TokenType.RPAREN)
+        self.expect(TokenType.SEMI)
+        return AsmStmt(str_token.value)
+
+    def parse_expr_stmt(self):
+        expr = self.parse_expr()
+        self.expect(TokenType.SEMI)
+        # For now, just return the expression. A dedicated ExprStmt AST node might be better.
+        # If the expression has side effects (like a function call), it's valid.
+        # If it doesn't, it's a no-op.
+        return expr # Or a new AST node like ExpressionStatement(expr)
 
     # Expression parsing with precedence climbing
     def parse_expr(self):
@@ -574,7 +616,7 @@ class Compiler:
         # Actually, variables could be on the stack, but the existing compiler allocates them sequentially in RAM.
         # We'll leave local variables allocated in RAM (static allocation) for simplicity,
         # but function arguments come from the stack.
-        # Arguments were pushed by caller. 
+        # Arguments were pushed by caller.
         # Stack structure upon entry before our push:
         # SP+0: arg N
         # ...
@@ -600,7 +642,7 @@ class Compiler:
         # Default return path (used if no return stmt is hit)
         self.emit("    POP C           ; restore ret low")
         self.emit("    POP D           ; restore ret high")
-        # Pop args from caller (by discarding them? No, caller cleans up args? 
+        # Pop args from caller (by discarding them? No, caller cleans up args?
         # Let's say callee doesn't clean up args, or caller cleans up.
         # Actually, a standard C calling convention has caller clean up.
         self.emit("    RET")
@@ -637,6 +679,18 @@ class Compiler:
             self.emit("    POP C           ; restore ret low")
             self.emit("    POP D           ; restore ret high")
             self.emit("    RET")
+
+        elif isinstance(node, AsmStmt):
+            # Format using self.variables, rendering addresses as 4-digit hex
+            formatted_vars = {k: f"{v:04X}" for k, v in self.variables.items()}
+            formatted_asm = node.asm_code
+            try:
+                formatted_asm = formatted_asm.format(**formatted_vars)
+            except Exception as e:
+                raise CompileError(f"Failed to expand variables in AsmStmt: {e}")
+                
+            for line in formatted_asm.split('\n'):
+                self.emit(line)
 
         elif isinstance(node, Block):
             for s in node.stmts:
