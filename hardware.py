@@ -105,6 +105,26 @@ class System:
                 v |= (1 << i)
         return v
 
+    def emit_human_readable(self, filename):
+        with open(filename, 'w') as f:
+            f.write("# Breadboard CPU - Human Readable Hardware Dump\n\n")
+            for chip in self.chips:
+                f.write(f"## {chip.ref} ({chip.part_name})\n")
+                f.write(f"*{chip.desc}*\n\n")
+                
+                # Sort pins systematically (inputs then outputs)
+                all_pins = chip.inputs + chip.outputs
+                
+                f.write("| Pin | Net Connection |\n")
+                f.write("|---|---|\n")
+                for pin in all_pins:
+                    net = chip.connections.get(pin)
+                    net_name = net.name if net else "UNCONNECTED"
+                    f.write(f"| {pin} | `{net_name}` |\n")
+                
+                f.write("\n")
+        print(f"Generated {filename}")
+
 class Chip:
     part_name = "Generic"
     def __init__(self, ref, inputs, outputs, desc=""):
@@ -787,6 +807,7 @@ if __name__ == "__main__":
         cpu = build_cpu()
         emit_wiring(cpu)
         emit_bom(cpu)
+        cpu.emit_human_readable("docs/hardware_dump.md")
         print("Generated structural docs.")
     elif len(sys.argv) > 1:
         # Load binary

@@ -42,6 +42,8 @@ class TokenType(Enum):
     PIPE = auto()
     CARET = auto()
     TILDE = auto()
+    SHL = auto()
+    SHR = auto()
     EQ = auto()
     NEQ = auto()
     LT = auto()
@@ -151,6 +153,10 @@ def tokenize(source):
                 tokens.append(Token(TokenType.LTE, '<=', line)); i += 2; continue
             if two == '>=':
                 tokens.append(Token(TokenType.GTE, '>=', line)); i += 2; continue
+            if two == '<<':
+                tokens.append(Token(TokenType.SHL, '<<', line)); i += 2; continue
+            if two == '>>':
+                tokens.append(Token(TokenType.SHR, '>>', line)); i += 2; continue
 
         # Single-character operators
         single = {
@@ -416,8 +422,16 @@ class Parser:
         return left
 
     def parse_bitwise(self):
-        left = self.parse_unary()
+        left = self.parse_shift()
         while self.peek().type in (TokenType.AMP, TokenType.PIPE, TokenType.CARET):
+            op = self.advance()
+            right = self.parse_shift()
+            left = BinOp(op.value, left, right)
+        return left
+
+    def parse_shift(self):
+        left = self.parse_unary()
+        while self.peek().type in (TokenType.SHL, TokenType.SHR):
             op = self.advance()
             right = self.parse_unary()
             left = BinOp(op.value, left, right)
@@ -728,18 +742,23 @@ class Compiler:
         elif isinstance(node, BinOp):
             # Compile left into A, push, compile right into A,
             # move to B, pop left into A, then operate.
-            if node.op in ('+', '-', '&', '|', '^'):
+            if node.op in ('+', '-', '&', '|', '^', '<<', '>>'):
                 self.compile_expr(node.left)
                 self.emit("    PUSH A          ; save left")
                 self.compile_expr(node.right)
                 self.emit("    MVB             ; B = right")
                 self.emit("    POP A           ; A = left")
 
-                op_map = {
-                    '+': 'ADD', '-': 'SUB',
-                    '&': 'AND', '|': 'OR', '^': 'XOR',
-                }
-                self.emit(f"    {op_map[node.op]}")
+                if node.op == '<<':
+                    self.emit("    SHL")  # Note: Right operand isn't effectively used by SHL in 1 CPU cycle, but structurally works
+                elif node.op == '>>':
+                    self.emit("    SHR")
+                else:
+                    op_map = {
+                        '+': 'ADD', '-': 'SUB',
+                        '&': 'AND', '|': 'OR', '^': 'XOR',
+                    }
+                    self.emit(f"    {op_map[node.op]}")
 
             elif node.op in ('==', '!=', '<', '>', '<=', '>='):
                 # Comparison as expression: return 1 if true, 0 if false

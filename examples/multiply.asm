@@ -16,8 +16,8 @@
     POP B           ; discard arg
     POP B           ; discard arg
     POP A           ; restore return val
-    STA [0x8002]    ; product
-    LDA [0x8002]    ; product
+    STA [0x8002]    ; product_lo
+    LDA [0x8002]    ; product_lo
     OUT
     HLT
 
@@ -25,14 +25,20 @@
 __fn_multiply:
     PUSH A          ; save ret high
     PUSH B          ; save ret low
-    LSA 4            ; load arg a
-    STA [0x8003]    ; param a
-    LSA 3            ; load arg b
-    STA [0x8004]    ; param b
+    LSA 4            ; load arg multiplier
+    STA [0x8003]    ; param multiplier
+    LSA 3            ; load arg multiplicand
+    STA [0x8004]    ; param multiplicand
     LDA #0
-    STA [0x8005]    ; result
+    STA [0x8005]    ; result_lo
+    LDA #0
+    STA [0x8006]    ; result_hi
+    LDA [0x8004]    ; multiplicand
+    STA [0x8007]    ; mc_lo
+    LDA #0
+    STA [0x8008]    ; mc_hi
 __while_1:
-    LDA [0x8004]    ; b
+    LDA [0x8003]    ; multiplier
     PSA             ; save left
     LDA #0
     MVB             ; B = right
@@ -40,23 +46,92 @@ __while_1:
     CMP             ; flags = A - B
     JC __endwhile_2
     JZ __endwhile_2
-    LDA [0x8005]    ; result
-    PUSH A          ; save left
-    LDA [0x8003]    ; a
-    MVB             ; B = right
-    POP A           ; A = left
-    ADD
-    STA [0x8005]    ; result
-    LDA [0x8004]    ; b
+    LDA [0x8003]    ; multiplier
     PUSH A          ; save left
     LDA #1
     MVB             ; B = right
     POP A           ; A = left
-    SUB
-    STA [0x8004]    ; b
+    AND
+    PSA             ; save left
+    LDA #1
+    MVB             ; B = right
+    PPA             ; A = left
+    CMP             ; flags = A - B
+    JNZ __else_3
+    LDA [0x8005]    ; result_lo
+    PUSH A          ; save left
+    LDA [0x8007]    ; mc_lo
+    MVB             ; B = right
+    POP A           ; A = left
+    ADD
+    STA [0x8005]    ; result_lo
+    LDA [0x8005]    ; result_lo
+    PSA             ; save left
+    LDA [0x8007]    ; mc_lo
+    MVB             ; B = right
+    PPA             ; A = left
+    CMP             ; flags = A - B
+    JNC __else_5
+    LDA [0x8006]    ; result_hi
+    PUSH A          ; save left
+    LDA #1
+    MVB             ; B = right
+    POP A           ; A = left
+    ADD
+    STA [0x8006]    ; result_hi
+__else_5:
+    LDA [0x8006]    ; result_hi
+    PUSH A          ; save left
+    LDA [0x8008]    ; mc_hi
+    MVB             ; B = right
+    POP A           ; A = left
+    ADD
+    STA [0x8006]    ; result_hi
+__else_3:
+    LDA [0x8003]    ; multiplier
+    PUSH A          ; save left
+    LDA #1
+    MVB             ; B = right
+    POP A           ; A = left
+    SHR
+    STA [0x8003]    ; multiplier
+    LDA [0x8007]    ; mc_lo
+    STA [0x8009]    ; old_mc_lo
+    LDA [0x8007]    ; mc_lo
+    PUSH A          ; save left
+    LDA #1
+    MVB             ; B = right
+    POP A           ; A = left
+    SHL
+    STA [0x8007]    ; mc_lo
+    LDA [0x8008]    ; mc_hi
+    PUSH A          ; save left
+    LDA #1
+    MVB             ; B = right
+    POP A           ; A = left
+    SHL
+    STA [0x8008]    ; mc_hi
+    LDA [0x8009]    ; old_mc_lo
+    PSA             ; save left
+    LDA #127
+    MVB             ; B = right
+    PPA             ; A = left
+    CMP             ; flags = A - B
+    JC __else_7
+    JZ __else_7
+    LDA [0x8008]    ; mc_hi
+    PUSH A          ; save left
+    LDA #1
+    MVB             ; B = right
+    POP A           ; A = left
+    ADD
+    STA [0x8008]    ; mc_hi
+__else_7:
     JMP __while_1
 __endwhile_2:
-    LDA [0x8005]    ; result
+    LDA [0x8006]    ; result_hi
+    OUT
+    LDA [0x8005]    ; result_lo
     POP C           ; restore ret low
     POP D           ; restore ret high
     RET
