@@ -646,3 +646,289 @@ _no_carry:
     POP B
     POP A
     RET
+
+; =============================================================================
+; 4x4 Matrix Keypad routines
+; =============================================================================
+;
+; Hardware wiring (shares the same output/input ports as I2C — no conflict):
+;
+;   Output port:
+;     Bit 0 = SDA  (I2C, unchanged)
+;     Bit 1 = SCL  (I2C, unchanged)
+;     Bit 2 = COL0  (active-low column select)
+;     Bit 3 = COL1
+;     Bit 4 = COL2
+;     Bit 5 = COL3
+;     Bits 6-7 unused
+;
+;   Input port:
+;     Bit 0 = SDA  (I2C ACK read-back, unchanged)
+;     Bit 4 = ROW0  (active-low, pulled up externally)
+;     Bit 5 = ROW1
+;     Bit 6 = ROW2
+;     Bit 7 = ROW3
+;
+; Key layout and returned key codes (0-15):
+;
+;        COL0  COL1  COL2  COL3
+;  ROW0:   1     2     3     A    (codes  0  1  2  3)
+;  ROW1:   4     5     6     B    (codes  4  5  6  7)
+;  ROW2:   7     8     9     C    (codes  8  9 10 11)
+;  ROW3:   *     0     #     D    (codes 12 13 14 15)
+;
+; Usage:
+;   CALL keypad_scan    → A = key code 0-15, or 0xFF if no key pressed
+;   CALL keypad_wait    → blocks until a key is pressed, returns code in A
+;
+; RAM used: 0x8006 (KP_COL_IDX), 0x8007 (KP_ROWS)
+;
+; The I2C idle state must be restored after keypad scan.
+; Call keypad_release (sets cols high) before using I2C again.
+; =============================================================================
+
+.equ KP_COL_MASK   0xFC     ; bits 2-5 all high = all columns deselected
+                             ; (bits 0-1 preserved as SDA/SCL from PORT_STATE)
+.equ KP_ROW_MASK   0xF0     ; input bits 4-7 = rows (active low)
+.equ KP_COL_IDX    0x8006   ; current column index (0-3) during scan
+.equ KP_ROWS       0x8007   ; raw row byte read from input port
+
+; --- keypad_release ---
+; Drive all column lines high (idle state). Call before I2C if keypad was used.
+; Clobbers: A
+keypad_release:
+    ; Set bits 2-5 high while preserving SDA/SCL bits from PORT_STATE
+    LDA [PORT_STATE]
+    LDB #KP_COL_MASK
+    OR
+    STA [PORT_STATE]
+    OUT A
+    RET
+
+; --- keypad_scan ---
+; Scan all 4 columns and return the first pressed key code in A (0-15).
+; Returns 0xFF in A if no key is pressed.
+; All column lines are left HIGH (idle) after the scan.
+; Clobbers: A, B, C, D
+keypad_scan:
+    PUSH A           ; save hi-ret
+    PUSH B           ; save lo-ret
+
+    ; Start with all columns high (idle)
+    CALL keypad_release
+
+    ; Scan each column: index in [KP_COL_IDX]
+    LDA #0
+    STA [KP_COL_IDX]
+
+_kp_col_loop:
+    ; Drive current column low.
+    ; Column N = bit (N+2) of output port.
+    ; Build mask: start with all-cols-high (bits 2-5 = 1), then clear bit (col+2).
+    ;
+    ; col_bit = 1 << (col + 2)
+    ; We compute it by shifting: start A=0x04, then << col times.
+    LDA [KP_COL_IDX]
+    TAB              ; B = col index (shift count)
+    LDA #0x04        ; 1 << 2 = col0 bit
+    ; Left-shift A by B times (SHL shifts by 1 each time)
+    ; Use a mini-loop stored inline via JZ exit trick
+_kp_shift_loop:
+    LDB #0           ; reload B each iter? No — we consumed B. Use memory.
+    ; Re-approach: store shift count in KP_ROWS temp
+    STA [KP_ROWS]    ; save current bit value
+    LDA [KP_COL_IDX] ; reload col index as remaining shifts needed
+    ; We'll decrement col_idx temporarily as shift counter
+    ; But we need col_idx for later. Save it in D.
+    TAD              ; D = col_idx (shift count remaining)
+_kp_shift2:
+    LDA #0
+    TBA              ; A = D? No — TAD is A→D. We need D→A.
+    ; We don't have TDA yet? Actually we do: TDA = transfer D to A = 0x1A
+    ; Wait — TDA is defined: DS_D | DD_A = DS=4, DD=1. Opcode 0x1A.
+    TDA              ; A = D (remaining shift count)
+    LDB #0
+    CMP              ; compare A with 0, sets Z if A==0
+    JZ _kp_shift_done
+    ; A != 0: shift KP_ROWS left and decrement D
+    LDA [KP_ROWS]
+    SHL
+    STA [KP_ROWS]    ; shifted bit value
+    TDA              ; A = D
+    LDB #1
+    SUB
+    TAD              ; D = A - 1
+    JMP _kp_shift2
+_kp_shift_done:
+    ; [KP_ROWS] = (0x04 << col_index) = the column's bit position
+    LDA [KP_ROWS]    ; A = col_bit
+
+    ; Drive output: all cols high OR'd with PORT_STATE SDA/SCL,
+    ; then clear this column's bit (active low).
+    TAB              ; B = col_bit
+    LDA [PORT_STATE]
+    LDB #KP_COL_MASK
+    OR               ; set all col bits high
+    ; Now clear the selected column bit: AND with ~col_bit
+    ; ~col_bit = NOT(col_bit). We don't have a NOT-then-AND, so:
+    ; store col_bit, NOT it, then AND.
+    STA [KP_ROWS]    ; save base value (all cols high + SDA/SCL)
+    ; Retrieve col_bit into B, NOT via XOR 0xFF
+    LDA [KP_COL_IDX]
+    TAD              ; D = col_index (for later)
+    ; Re-compute col_bit cleanly:
+    LDA [KP_COL_IDX]
+    LDB #0
+    CMP              ; col == 0?
+    JNZ _kp_not_col0
+    LDA #0xFB        ; ~0x04 = NOT(col0 bit)
+    JMP _kp_got_notmask
+_kp_not_col0:
+    LDB #1
+    CMP
+    JNZ _kp_not_col1
+    LDA #0xF7        ; ~0x08
+    JMP _kp_got_notmask
+_kp_not_col1:
+    LDB #2
+    CMP
+    JNZ _kp_not_col2
+    LDA #0xEF        ; ~0x10
+    JMP _kp_got_notmask
+_kp_not_col2:
+    LDA #0xDF        ; ~0x20 = NOT(col3 bit)
+_kp_got_notmask:
+    ; A = ~col_bit. AND with [KP_ROWS] (all-cols-high + SDA/SCL)
+    TAB              ; B = ~col_bit
+    LDA [KP_ROWS]
+    AND              ; A = (all-cols-high | SDA/SCL) & ~col_bit = drive this col LOW
+    OUT A            ; drive output port
+    ; Short settle delay
+    NOP
+    NOP
+    NOP
+    NOP
+    ; Read rows from input port
+    IN A
+    ; Rows are active-LOW on bits 4-7. Isolate and invert so pressed = 1.
+    LDB #KP_ROW_MASK
+    AND              ; A = raw row bits (pressed = 0)
+    LDB #KP_ROW_MASK
+    XOR              ; A = inverted row bits (pressed = 1)
+    STA [KP_ROWS]   ; save for decoding
+
+    ; If any row bit set, decode which key was pressed
+    LDB #0
+    CMP
+    JNZ _kp_got_press
+
+    ; No press in this column — advance to next column
+    LDA [KP_COL_IDX]
+    LDB #1
+    ADD
+    STA [KP_COL_IDX]
+    LDB #4
+    CMP              ; all 4 columns scanned?
+    JNZ _kp_col_loop
+
+    ; No key pressed at all: return 0xFF
+    CALL keypad_release
+    LDA #0xFF
+    POP B
+    POP A
+    RET
+
+_kp_got_press:
+    ; Decode key code = col_index * 4 + row_index
+    ; Row index is the position of the set bit in bits 4-7.
+    ; Bit 4 = row 0, bit 5 = row 1, bit 6 = row 2, bit 7 = row 3.
+    LDA [KP_ROWS]    ; A = inverted row byte (bit 4-7 only)
+    ; Shift right 4 to get rows in bits 0-3
+    SHR
+    SHR
+    SHR
+    SHR              ; A = 0bXXXX with bit0=row0, bit1=row1, etc.
+    STA [KP_ROWS]    ; save shifted rows
+
+    ; Find lowest set bit (= lowest row pressed)
+    LDA #0           ; row_index = 0
+    STA [KP_COL_IDX] ; reuse as row_index temp
+_kp_row_find:
+    LDA [KP_ROWS]
+    LDB #0x01
+    AND              ; test bit 0
+    JNZ _kp_row_found
+    ; Shift right, increment row index
+    LDA [KP_ROWS]
+    SHR
+    STA [KP_ROWS]
+    LDA [KP_COL_IDX]
+    LDB #1
+    ADD
+    STA [KP_COL_IDX]
+    JMP _kp_row_find
+_kp_row_found:
+    ; key_code = D * 4 + [KP_COL_IDX]
+    ; D = col_index (saved earlier). Multiply col by 4 = SHL twice.
+    TDA              ; A = col_index
+    SHL              ; A = col * 2
+    SHL              ; A = col * 4
+    TAB              ; B = col * 4
+    LDA [KP_COL_IDX] ; A = row_index
+    ADD              ; A = col*4 + row = key code 0..15
+    ; Leave A as return value; restore columns to idle
+    TAB              ; B = key_code (protect it)
+    CALL keypad_release
+    TBA              ; A = key_code
+
+    POP B            ; restore hi-ret (CALL convention)
+    POP A            ; restore lo-ret
+    RET
+
+; --- keypad_wait ---
+; Block until a key is pressed. Returns key code (0-15) in A.
+; Clobbers: A, B, C, D
+keypad_wait:
+    PUSH A
+    PUSH B
+_kp_wait_loop:
+    CALL keypad_scan
+    LDB #0xFF
+    CMP              ; A == 0xFF means no key
+    JZ _kp_wait_loop ; keep scanning
+    ; A now holds a valid key code
+    POP B
+    POP A
+    RET
+
+; --- keypad_to_char ---
+; Convert key code in A (0-15) to its printed character in A.
+; Key layout: 1234 / 5678 / 90*# / ABCD
+; More specifically:
+;    0→'1'  1→'2'  2→'3'  3→'A'
+;    4→'4'  5→'5'  6→'6'  7→'B'
+;    8→'7'  9→'8' 10→'9' 11→'C'
+;   12→'*' 13→'0' 14→'#' 15→'D'
+; Clobbers: A, B
+keypad_to_char:
+    PUSH A           ; hi-ret
+    PUSH B           ; lo-ret
+    LSA 3            ; reload key code from stack
+    ; Index into key_char_table
+    LDB #<key_char_table
+    ADD
+    ; Self-modify read
+    STA [_kp_char_read+1]
+    LDA #>key_char_table
+    STA [_kp_char_read+2]
+_kp_char_read:
+    LDA [0x0000]     ; self-modified: read char from table
+    POP B
+    POP A
+    RET
+
+key_char_table:
+.db '1', '2', '3', 'A'
+.db '4', '5', '6', 'B'
+.db '7', '8', '9', 'C'
+.db '*', '0', '#', 'D'
