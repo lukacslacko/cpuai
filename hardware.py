@@ -4,13 +4,17 @@ Structural Hardware Emulator for the Breadboard CPU.
 Simulates individual 74HC series chips, memory, and GALs.
 Also generates wiring documentation and Bill of Materials automatically.
 
-Architecture: H/L D-to-A register model.
-  - All general-purpose registers (A, B, C, D, IR, H, L, SP) connect to DATA bus only.
-  - H register always drives ADDR[15:8].
-  - L register always drives ADDR[7:0].
-  - No separate address-bus buffers for IP, CD, or SP.
-  - IP (4x 74HC161) is read via DS_IPL (lo) / DS_IPH (hi) onto data bus.
+Architecture: H/L register model, 16-bit control word (2 EEPROMs).
+  - All registers connect to the 8-bit DATA bus only.
+  - H register always drives ADDR[15:8], L always drives ADDR[7:0].
+  - IP (4x 74HC161) is read via DS_IPL / DS_IPH onto data bus.
   - Fetch: DS_IPL|DD_L (uIP=0), DS_IPH|DD_H (uIP=1), DS_MEM|DD_IR|IP_INC (uIP=2).
+
+Control word (16 bits):
+  Bits 0-3:  DS (data source)     Bits 4-7:  DD (data dest, 13=HLT)
+  Bits 8-10: ALU_OP               Bit 11:    FLAGS_IN
+  Bit 12:    IP_INC               Bit 13:    SP_INC
+  Bit 14:    SP_DEC               Bit 15:    uIP_RST
 """
 
 import sys
@@ -67,10 +71,9 @@ class System:
     def load_rom(self, data):
         self.rom_chip.load(data)
         
-    def load_microcode(self, mc_a, mc_b, mc_c):
+    def load_microcode(self, mc_a, mc_b):
         self.mc_a.load(mc_a)
         self.mc_b.load(mc_b)
-        self.mc_c.load(mc_c)
 
     def eval_combinational(self):
         for _ in range(30):
@@ -392,10 +395,9 @@ def build_cpu():
     sys.wire(ir, "~OE", sys.net("GND"))
     for i in range(8): sys.wire(ir, f"D{i}", data_bus[i])
         
-    mc_a = sys.add(IC_28C256("U3", "Microcode EEPROM A"))
-    mc_b = sys.add(IC_28C256("U4", "Microcode EEPROM B"))
-    mc_c = sys.add(IC_28C256("U4b", "Microcode EEPROM C"))
-    for mc in [mc_a, mc_b, mc_c]:
+    mc_a = sys.add(IC_28C256("U3", "Microcode EEPROM A (bits 0-7)"))
+    mc_b = sys.add(IC_28C256("U4", "Microcode EEPROM B (bits 8-15)"))
+    for mc in [mc_a, mc_b]:
         sys.wire(mc, "~CE", sys.net("GND"))
         sys.wire(mc, "~OE", sys.net("GND"))
         sys.wire(mc, "~WE", sys.net("VCC"))
@@ -410,7 +412,6 @@ def build_cpu():
     for i in range(8):
         sys.wire(mc_a, f"Q{i}", sys.net(f"CTRL{i}"))
         sys.wire(mc_b, f"Q{i}", sys.net(f"CTRL{i+8}"))
-        sys.wire(mc_c, f"Q{i}", sys.net(f"CTRL{i+16}"))
         
     # =========================================================================
     # Clock Inverter
@@ -420,21 +421,18 @@ def build_cpu():
     sys.wire(inv1, "1Y", sys.net("~CLK"))
     
     # =========================================================================
-    # Control Decode
-    # Control word layout:
-    #   bits  0-3: DS  (data bus source, 4-bit, 16 sources)
-    #   bits  4-7: DD  (data bus dest,   4-bit, 16 dests)
-    #   bits  8-9: unused
-    #   bits 10-12: ALU_OP
-    #   bit  13: FLAGS_IN
-    #   bit  14: IP_INC
-    #   bit  15: SP_INC
-    #   bit  16: SP_DEC
-    #   bit  17: uIP_RST
-    #   bit  18: HLT
+    # Control Decode (16-bit control word, 2 EEPROMs)
+    #   bits  0-3:  DS  (data bus source)
+    #   bits  4-7:  DD  (data bus dest, 13=HLT)
+    #   bits  8-10: ALU_OP
+    #   bit  11:    FLAGS_IN
+    #   bit  12:    IP_INC
+    #   bit  13:    SP_INC
+    #   bit  14:    SP_DEC
+    #   bit  15:    uIP_RST
     #
     # DS values:  0=none, 1=A, 2=B, 3=C, 4=D, 5=ALU, 6=MEM, 7=IPL, 8=IPH, 9=SP, 10=0xFF
-    # DD values:  0=none, 1=A, 2=B, 3=C, 4=D, 5=IR,  6=MEM, 7=H,   8=L,   9=IPL, 10=IPH, 11=SP, 12=OUT
+    # DD values:  0=none, 1=A, 2=B, 3=C, 4=D, 5=IR, 6=MEM, 7=H, 8=L, 9=IPL, 10=IPH, 11=SP, 12=OUT, 13=HLT
     # =========================================================================
 
     # Source decoder: 4-to-16 (CTRL0-3)
@@ -487,6 +485,7 @@ def build_cpu():
     sys.wire(dst_dec_uc, "~Y10", sys.net("~UC_IP_HI"))   # Level sensitive IPH load
     sys.wire(dst_dec_uc, "~Y11", sys.net("~UC_SP"))      # Level sensitive SP load
     wire_dst(12, "OUT")
+    sys.wire(dst_dec_uc, "~Y13", sys.net("~HLT"))        # HLT encoded as DD=13
 
     # Source map:
     #  1: A   2: B   3: C   4: D   5: ALU   6: MEM
@@ -571,11 +570,11 @@ def build_cpu():
     sys.ip = ip
     
     # Carry chain for increment
-    sys.wire(ip[0], "ENT", sys.net("CTRL14"))   # IP_INC bit
-    sys.wire(ip[0], "ENP", sys.net("CTRL14"))
+    sys.wire(ip[0], "ENT", sys.net("CTRL12"))   # IP_INC bit
+    sys.wire(ip[0], "ENP", sys.net("CTRL12"))
     for i in range(3):
         sys.wire(ip[i+1], "ENT", sys.net(f"IP{i}_RCO"))
-        sys.wire(ip[i+1], "ENP", sys.net("CTRL14"))
+        sys.wire(ip[i+1], "ENP", sys.net("CTRL12"))
         sys.wire(ip[i], "RCO", sys.net(f"IP{i}_RCO"))
     
     for i in range(4):
@@ -622,11 +621,11 @@ def build_cpu():
             for i in range(1, 5): self.write(f'{i}Y', 1 - (self.read(f'{i}A') & self.read(f'{i}B')))
 
     nand_sp = sys.add(IC_74HC00("U_NAND_SP"))
-    sys.wire(nand_sp, "1A", sys.net("CTRL15"))  # SP_INC
+    sys.wire(nand_sp, "1A", sys.net("CTRL13"))  # SP_INC
     sys.wire(nand_sp, "1B", sys.net("CLK"))
     sys.wire(nand_sp, "1Y", sys.net("SP_UP_NAND"))
     
-    sys.wire(nand_sp, "2A", sys.net("CTRL16"))  # SP_DEC
+    sys.wire(nand_sp, "2A", sys.net("CTRL14"))  # SP_DEC
     sys.wire(nand_sp, "2B", sys.net("CLK"))
     sys.wire(nand_sp, "2Y", sys.net("SP_DN_NAND"))
     
@@ -670,12 +669,12 @@ def build_cpu():
         sys.wire(alu, f"B{i}", sys.net(f"B_Q{i}"))
         sys.wire(alu, f"Q{i}", data_bus[i])
         
-    sys.wire(alu, "OP0", sys.net("CTRL10"))
-    sys.wire(alu, "OP1", sys.net("CTRL11"))
-    sys.wire(alu, "OP2", sys.net("CTRL12"))
+    sys.wire(alu, "OP0", sys.net("CTRL8"))
+    sys.wire(alu, "OP1", sys.net("CTRL9"))
+    sys.wire(alu, "OP2", sys.net("CTRL10"))
     
     and_flg = sys.add(IC_74HC08("U_AND_FLG"))
-    sys.wire(and_flg, "4A", sys.net("CTRL13"))
+    sys.wire(and_flg, "4A", sys.net("CTRL11"))  # FLAGS_IN
     sys.wire(and_flg, "4B", sys.net("CLK"))
     sys.wire(and_flg, "4Y", sys.net("FLAGS_CLK"))
     # Gates 1-3 unused
@@ -716,17 +715,19 @@ def build_cpu():
     # Reset / uIP_RST logic
     # =========================================================================
     inv_rst = sys.add(IC_74HC04("U_INV_RST"))
-    sys.wire(inv_rst, "5A", sys.net("CTRL17"))
+    sys.wire(inv_rst, "5A", sys.net("CTRL15"))   # uIP_RST
     sys.wire(inv_rst, "5Y", sys.net("~uIP_RST"))
     
-    # HLT Logic - CTRL18
-    sys.hlt_net = sys.net("CTRL18")
+    # HLT Logic - encoded as DD=13, active-low from dest decoder
+    inv_hlt = sys.add(IC_74HC04("U_INV_HLT"))
+    sys.wire(inv_hlt, "2A", sys.net("~HLT"))
+    sys.wire(inv_hlt, "2Y", sys.net("HLT_ACTIVE"))
+    sys.hlt_net = sys.net("HLT_ACTIVE")
 
     sys.rom_chip = rom
     sys.ram_chip = ram
     sys.mc_a = mc_a
     sys.mc_b = mc_b
-    sys.mc_c = mc_c
     sys.ir = ir
     
     return sys
@@ -746,13 +747,13 @@ def dump_state(sys_obj):
     flags = f"{'Z' if freg.val & 1 else '.'}{'C' if freg.val & 2 else '.'}{'N' if freg.val & 4 else '.'}"
     
     ctrl = 0
-    for i in range(24):
+    for i in range(16):
         if sys_obj.net(f"CTRL{i}").state: ctrl |= (1 << i)
 
     ds = ctrl & 0x0F
     dd = (ctrl >> 4) & 0x0F
     
-    print(f"IP={IP:04X} SP={SP:02X} H={H:02X} L={L:02X} A={A:02X} B={B:02X} C={C:02X} D={D:02X} [{flags}] CW={ctrl:06X}")
+    print(f"IP={IP:04X} SP={SP:02X} H={H:02X} L={L:02X} A={A:02X} B={B:02X} C={C:02X} D={D:02X} [{flags}] CW={ctrl:04X}")
 
 def emit_wiring(sys):
     with open("docs/wiring.md", "w") as f:
@@ -825,11 +826,10 @@ if __name__ == "__main__":
             
         with open("microcode_a.bin", "rb") as f: mc_a = f.read()
         with open("microcode_b.bin", "rb") as f: mc_b = f.read()
-        with open("microcode_c.bin", "rb") as f: mc_c = f.read()
             
         cpu = build_cpu()
         cpu.load_rom(prog)
-        cpu.load_microcode(mc_a, mc_b, mc_c)
+        cpu.load_microcode(mc_a, mc_b)
         run_sim(cpu)
     else:
         print("Usage: python hardware.py emit")

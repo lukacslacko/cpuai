@@ -1,9 +1,28 @@
 # Auto-generated Wiring Guide
 
+## Bill of Materials
+
+| Part | Quantity |
+|---|---|
+| 28C256 | 3 |
+| 62256 | 1 |
+| 74HC00 | 1 |
+| 74HC04 | 2 |
+| 74HC08 | 1 |
+| 74HC154 | 3 |
+| 74HC161 | 5 |
+| 74HC193 | 2 |
+| 74HC245 | 3 |
+| 74HC283 | 2 |
+| 74HC574 | 8 |
+| GAL22V10 | 1 |
+
+---
+
 ## U2 (74HC161) - uIP Counter
 | Pin Name | Connects to Net |
 |---|---|
-| ~CLR | ~uIP_CLR |
+| ~CLR | ~RESET |
 | CLK | ~CLK |
 | A | GND |
 | B | GND |
@@ -11,7 +30,7 @@
 | D | GND |
 | ENP | VCC |
 | ENT | VCC |
-| ~LOAD | VCC |
+| ~LOAD | ~uIP_RST |
 | QA | uIP_Q0 |
 | QB | uIP_Q1 |
 | QC | uIP_Q2 |
@@ -61,7 +80,7 @@
 | Q6 | IR_Q6 |
 | Q7 | IR_Q7 |
 
-## U3 (28C256) - Microcode EEPROM A
+## U3 (28C256) - Microcode EEPROM A (bits 0-7)
 | Pin Name | Connects to Net |
 |---|---|
 | ~CE | GND |
@@ -91,7 +110,7 @@
 | Q6 | CTRL6 |
 | Q7 | CTRL7 |
 
-## U4 (28C256) - Microcode EEPROM B
+## U4 (28C256) - Microcode EEPROM B (bits 8-15)
 | Pin Name | Connects to Net |
 |---|---|
 | ~CE | GND |
@@ -121,35 +140,37 @@
 | Q6 | CTRL14 |
 | Q7 | CTRL15 |
 
-## U4b (28C256) - Microcode EEPROM C
+## U_INV1 (74HC04) - Inverters 1 (CLK, dest A-D, IR)
 | Pin Name | Connects to Net |
 |---|---|
-| ~CE | GND |
-| ~OE | GND |
-| ~WE | VCC |
-| A0 | uIP_Q0 |
-| A1 | uIP_Q1 |
-| A2 | uIP_Q2 |
-| A3 | uIP_Q3 |
-| A4 | FLAGS_Q0 |
-| A5 | FLAGS_Q1 |
-| A6 | FLAGS_Q2 |
-| A7 | IR_Q0 |
-| A8 | IR_Q1 |
-| A9 | IR_Q2 |
-| A10 | IR_Q3 |
-| A11 | IR_Q4 |
-| A12 | IR_Q5 |
-| A13 | IR_Q6 |
-| A14 | IR_Q7 |
-| Q0 | CTRL16 |
-| Q1 | CTRL17 |
-| Q2 | CTRL18 |
-| Q3 | CTRL19 |
-| Q4 | CTRL20 |
-| Q5 | CTRL21 |
-| Q6 | CTRL22 |
-| Q7 | CTRL23 |
+| 1A | CLK |
+| 2A | ~DST_A |
+| 3A | ~DST_B |
+| 4A | ~DST_C |
+| 5A | ~DST_D |
+| 6A | ~DST_IR |
+| 1Y | ~CLK |
+| 2Y | A_CLK |
+| 3Y | B_CLK |
+| 4Y | C_CLK |
+| 5Y | D_CLK |
+| 6Y | IR_CLK |
+
+## U_INV2 (74HC04) - Inverters 2 (dest H,L,OUT, A15, uIP_RST, HLT)
+| Pin Name | Connects to Net |
+|---|---|
+| 1A | ~DST_H |
+| 2A | ~DST_L |
+| 3A | ~DST_OUT |
+| 4A | ADDR15 |
+| 5A | CTRL15 |
+| 6A | ~HLT |
+| 1Y | H_CLK |
+| 2Y | L_CLK |
+| 3Y | OUT_CLK |
+| 4Y | ~A15 |
+| 5Y | ~uIP_RST |
+| 6Y | HLT_ACTIVE |
 
 ## U5 (74HC154) - Bus Source Decoder
 | Pin Name | Connects to Net |
@@ -166,15 +187,9 @@
 | ~Y4 | ~D_OE |
 | ~Y5 | ~ALU_OE |
 | ~Y6 | ~MEM_OE |
-| ~Y7 | ~IP_LO_OE |
-| ~Y8 | ~IP_HI_OE |
+| ~Y7 | ~IPL_OE |
+| ~Y8 | ~IPH_OE |
 | ~Y9 | ~SP_OE |
-
-## UINV1 (74HC04) - Clock Inverter
-| Pin Name | Connects to Net |
-|---|---|
-| 1A | CLK |
-| 1Y | ~CLK |
 
 ## U6 (74HC154) - Bus Dest Decoder
 | Pin Name | Connects to Net |
@@ -190,44 +205,9 @@
 | ~Y3 | ~DST_C |
 | ~Y4 | ~DST_D |
 | ~Y5 | ~DST_IR |
-| ~Y6 | ~MEM_WE |
-| ~Y10 | ~DST_OUT |
-
-## UINV_A (74HC04) - Hex Inverter
-| Pin Name | Connects to Net |
-|---|---|
-| 1A | ~DST_A |
-| 1Y | A_CLK |
-
-## UINV_B (74HC04) - Hex Inverter
-| Pin Name | Connects to Net |
-|---|---|
-| 1A | ~DST_B |
-| 1Y | B_CLK |
-
-## UINV_C (74HC04) - Hex Inverter
-| Pin Name | Connects to Net |
-|---|---|
-| 1A | ~DST_C |
-| 1Y | C_CLK |
-
-## UINV_D (74HC04) - Hex Inverter
-| Pin Name | Connects to Net |
-|---|---|
-| 1A | ~DST_D |
-| 1Y | D_CLK |
-
-## UINV_IR (74HC04) - Hex Inverter
-| Pin Name | Connects to Net |
-|---|---|
-| 1A | ~DST_IR |
-| 1Y | IR_CLK |
-
-## UINV_OUT (74HC04) - Hex Inverter
-| Pin Name | Connects to Net |
-|---|---|
-| 1A | ~DST_OUT |
-| 1Y | OUT_CLK |
+| ~Y7 | ~DST_H |
+| ~Y8 | ~DST_L |
+| ~Y12 | ~DST_OUT |
 
 ## U6B (74HC154) - Unclocked Dest Decoder
 | Pin Name | Connects to Net |
@@ -238,9 +218,11 @@
 | D | CTRL7 |
 | ~G1 | GND |
 | ~G2 | GND |
-| ~Y7 | ~UC_IP_LO |
-| ~Y8 | ~UC_IP_HI |
-| ~Y9 | ~UC_SP |
+| ~Y6 | ~MEM_WE |
+| ~Y9 | ~UC_IP_LO |
+| ~Y10 | ~UC_IP_HI |
+| ~Y11 | ~UC_SP |
+| ~Y13 | ~HLT |
 
 ## U_A (74HC574) - A Register
 | Pin Name | Connects to Net |
@@ -330,94 +312,49 @@
 | Q6 | DATA6 |
 | Q7 | DATA7 |
 
-## U_ADDR_DEC (74HC138) - ADDR Source Decode
+## U_H (74HC574) - H Register (ADDR[15:8])
 | Pin Name | Connects to Net |
 |---|---|
-| A | CTRL8 |
-| B | CTRL9 |
-| C | GND |
-| ~G2A | GND |
-| ~G2B | GND |
-| G1 | VCC |
-| ~Y0 | ~IP_ADDR_OE |
-| ~Y1 | ~CD_ADDR_OE |
-| ~Y2 | ~SP_ADDR_OE |
+| ~OE | GND |
+| CLK | H_CLK |
+| D0 | DATA0 |
+| D1 | DATA1 |
+| D2 | DATA2 |
+| D3 | DATA3 |
+| D4 | DATA4 |
+| D5 | DATA5 |
+| D6 | DATA6 |
+| D7 | DATA7 |
+| Q0 | ADDR8 |
+| Q1 | ADDR9 |
+| Q2 | ADDR10 |
+| Q3 | ADDR11 |
+| Q4 | ADDR12 |
+| Q5 | ADDR13 |
+| Q6 | ADDR14 |
+| Q7 | ADDR15 |
 
-## U_CD_BUF_LO (74HC245) - C to ADDR_LO
+## U_L (74HC574) - L Register (ADDR[7:0])
 | Pin Name | Connects to Net |
 |---|---|
-| DIR | VCC |
-| ~OE | ~CD_ADDR_OE |
-| A0 | C_Q0 |
-| A1 | C_Q1 |
-| A2 | C_Q2 |
-| A3 | C_Q3 |
-| A4 | C_Q4 |
-| A5 | C_Q5 |
-| A6 | C_Q6 |
-| A7 | C_Q7 |
-| B0 | ADDR0 |
-| B1 | ADDR1 |
-| B2 | ADDR2 |
-| B3 | ADDR3 |
-| B4 | ADDR4 |
-| B5 | ADDR5 |
-| B6 | ADDR6 |
-| B7 | ADDR7 |
-| A0_OUT | C_Q0 |
-| A1_OUT | C_Q1 |
-| A2_OUT | C_Q2 |
-| A3_OUT | C_Q3 |
-| A4_OUT | C_Q4 |
-| A5_OUT | C_Q5 |
-| A6_OUT | C_Q6 |
-| A7_OUT | C_Q7 |
-| B0_OUT | ADDR0 |
-| B1_OUT | ADDR1 |
-| B2_OUT | ADDR2 |
-| B3_OUT | ADDR3 |
-| B4_OUT | ADDR4 |
-| B5_OUT | ADDR5 |
-| B6_OUT | ADDR6 |
-| B7_OUT | ADDR7 |
-
-## U_CD_BUF_HI (74HC245) - D to ADDR_HI
-| Pin Name | Connects to Net |
-|---|---|
-| DIR | VCC |
-| ~OE | ~CD_ADDR_OE |
-| A0 | D_Q0 |
-| A1 | D_Q1 |
-| A2 | D_Q2 |
-| A3 | D_Q3 |
-| A4 | D_Q4 |
-| A5 | D_Q5 |
-| A6 | D_Q6 |
-| A7 | D_Q7 |
-| B0 | ADDR8 |
-| B1 | ADDR9 |
-| B2 | ADDR10 |
-| B3 | ADDR11 |
-| B4 | ADDR12 |
-| B5 | ADDR13 |
-| B6 | ADDR14 |
-| B7 | ADDR15 |
-| A0_OUT | D_Q0 |
-| A1_OUT | D_Q1 |
-| A2_OUT | D_Q2 |
-| A3_OUT | D_Q3 |
-| A4_OUT | D_Q4 |
-| A5_OUT | D_Q5 |
-| A6_OUT | D_Q6 |
-| A7_OUT | D_Q7 |
-| B0_OUT | ADDR8 |
-| B1_OUT | ADDR9 |
-| B2_OUT | ADDR10 |
-| B3_OUT | ADDR11 |
-| B4_OUT | ADDR12 |
-| B5_OUT | ADDR13 |
-| B6_OUT | ADDR14 |
-| B7_OUT | ADDR15 |
+| ~OE | GND |
+| CLK | L_CLK |
+| D0 | DATA0 |
+| D1 | DATA1 |
+| D2 | DATA2 |
+| D3 | DATA3 |
+| D4 | DATA4 |
+| D5 | DATA5 |
+| D6 | DATA6 |
+| D7 | DATA7 |
+| Q0 | ADDR0 |
+| Q1 | ADDR1 |
+| Q2 | ADDR2 |
+| Q3 | ADDR3 |
+| Q4 | ADDR4 |
+| Q5 | ADDR5 |
+| Q6 | ADDR6 |
+| Q7 | ADDR7 |
 
 ## U_IP0 (74HC161) - 4-bit Counter
 | Pin Name | Connects to Net |
@@ -428,8 +365,8 @@
 | B | DATA1 |
 | C | DATA2 |
 | D | DATA3 |
-| ENP | CTRL14 |
-| ENT | CTRL14 |
+| ENP | CTRL12 |
+| ENT | CTRL12 |
 | ~LOAD | ~UC_IP_LO |
 | RCO | IP0_RCO |
 
@@ -442,7 +379,7 @@
 | B | DATA5 |
 | C | DATA6 |
 | D | DATA7 |
-| ENP | CTRL14 |
+| ENP | CTRL12 |
 | ENT | IP0_RCO |
 | ~LOAD | ~UC_IP_LO |
 | RCO | IP1_RCO |
@@ -456,7 +393,7 @@
 | B | DATA1 |
 | C | DATA2 |
 | D | DATA3 |
-| ENP | CTRL14 |
+| ENP | CTRL12 |
 | ENT | IP1_RCO |
 | ~LOAD | ~UC_IP_HI |
 | RCO | IP2_RCO |
@@ -470,91 +407,15 @@
 | B | DATA5 |
 | C | DATA6 |
 | D | DATA7 |
-| ENP | CTRL14 |
+| ENP | CTRL12 |
 | ENT | IP2_RCO |
 | ~LOAD | ~UC_IP_HI |
 
-## U_IP_ADDR_LO (74HC245) - 8-bit Transceiver
+## U_IPL_DATA (74HC245) - IPL to Data Bus
 | Pin Name | Connects to Net |
 |---|---|
 | DIR | VCC |
-| ~OE | ~IP_ADDR_OE |
-| A0 | IP_Q0 |
-| A1 | IP_Q1 |
-| A2 | IP_Q2 |
-| A3 | IP_Q3 |
-| A4 | IP_Q4 |
-| A5 | IP_Q5 |
-| A6 | IP_Q6 |
-| A7 | IP_Q7 |
-| B0 | ADDR0 |
-| B1 | ADDR1 |
-| B2 | ADDR2 |
-| B3 | ADDR3 |
-| B4 | ADDR4 |
-| B5 | ADDR5 |
-| B6 | ADDR6 |
-| B7 | ADDR7 |
-| A0_OUT | IP_Q0 |
-| A1_OUT | IP_Q1 |
-| A2_OUT | IP_Q2 |
-| A3_OUT | IP_Q3 |
-| A4_OUT | IP_Q4 |
-| A5_OUT | IP_Q5 |
-| A6_OUT | IP_Q6 |
-| A7_OUT | IP_Q7 |
-| B0_OUT | ADDR0 |
-| B1_OUT | ADDR1 |
-| B2_OUT | ADDR2 |
-| B3_OUT | ADDR3 |
-| B4_OUT | ADDR4 |
-| B5_OUT | ADDR5 |
-| B6_OUT | ADDR6 |
-| B7_OUT | ADDR7 |
-
-## U_IP_ADDR_HI (74HC245) - 8-bit Transceiver
-| Pin Name | Connects to Net |
-|---|---|
-| DIR | VCC |
-| ~OE | ~IP_ADDR_OE |
-| A0 | IP_Q8 |
-| A1 | IP_Q9 |
-| A2 | IP_Q10 |
-| A3 | IP_Q11 |
-| A4 | IP_Q12 |
-| A5 | IP_Q13 |
-| A6 | IP_Q14 |
-| A7 | IP_Q15 |
-| B0 | ADDR8 |
-| B1 | ADDR9 |
-| B2 | ADDR10 |
-| B3 | ADDR11 |
-| B4 | ADDR12 |
-| B5 | ADDR13 |
-| B6 | ADDR14 |
-| B7 | ADDR15 |
-| A0_OUT | IP_Q8 |
-| A1_OUT | IP_Q9 |
-| A2_OUT | IP_Q10 |
-| A3_OUT | IP_Q11 |
-| A4_OUT | IP_Q12 |
-| A5_OUT | IP_Q13 |
-| A6_OUT | IP_Q14 |
-| A7_OUT | IP_Q15 |
-| B0_OUT | ADDR8 |
-| B1_OUT | ADDR9 |
-| B2_OUT | ADDR10 |
-| B3_OUT | ADDR11 |
-| B4_OUT | ADDR12 |
-| B5_OUT | ADDR13 |
-| B6_OUT | ADDR14 |
-| B7_OUT | ADDR15 |
-
-## U_IP_DATA_LO (74HC245) - 8-bit Transceiver
-| Pin Name | Connects to Net |
-|---|---|
-| DIR | VCC |
-| ~OE | ~IP_LO_OE |
+| ~OE | ~IPL_OE |
 | A0 | IP_Q0 |
 | A1 | IP_Q1 |
 | A2 | IP_Q2 |
@@ -588,11 +449,11 @@
 | B6_OUT | DATA6 |
 | B7_OUT | DATA7 |
 
-## U_IP_DATA_HI (74HC245) - 8-bit Transceiver
+## U_IPH_DATA (74HC245) - IPH to Data Bus
 | Pin Name | Connects to Net |
 |---|---|
 | DIR | VCC |
-| ~OE | ~IP_HI_OE |
+| ~OE | ~IPH_OE |
 | A0 | IP_Q8 |
 | A1 | IP_Q9 |
 | A2 | IP_Q10 |
@@ -655,52 +516,14 @@
 ## U_NAND_SP (74HC00) - Quad NAND
 | Pin Name | Connects to Net |
 |---|---|
-| 1A | CTRL15 |
+| 1A | CTRL13 |
 | 1B | CLK |
-| 2A | CTRL16 |
+| 2A | CTRL14 |
 | 2B | CLK |
 | 1Y | SP_UP_NAND |
 | 2Y | SP_DN_NAND |
 
-## U_SP_DATA (74HC245) - 8-bit Transceiver
-| Pin Name | Connects to Net |
-|---|---|
-| DIR | VCC |
-| ~OE | ~SP_OE |
-| A0 | SP_Q0 |
-| A1 | SP_Q1 |
-| A2 | SP_Q2 |
-| A3 | SP_Q3 |
-| A4 | SP_Q4 |
-| A5 | SP_Q5 |
-| A6 | SP_Q6 |
-| A7 | SP_Q7 |
-| B0 | DATA0 |
-| B1 | DATA1 |
-| B2 | DATA2 |
-| B3 | DATA3 |
-| B4 | DATA4 |
-| B5 | DATA5 |
-| B6 | DATA6 |
-| B7 | DATA7 |
-| A0_OUT | SP_Q0 |
-| A1_OUT | SP_Q1 |
-| A2_OUT | SP_Q2 |
-| A3_OUT | SP_Q3 |
-| A4_OUT | SP_Q4 |
-| A5_OUT | SP_Q5 |
-| A6_OUT | SP_Q6 |
-| A7_OUT | SP_Q7 |
-| B0_OUT | DATA0 |
-| B1_OUT | DATA1 |
-| B2_OUT | DATA2 |
-| B3_OUT | DATA3 |
-| B4_OUT | DATA4 |
-| B5_OUT | DATA5 |
-| B6_OUT | DATA6 |
-| B7_OUT | DATA7 |
-
-## U_ADD1 (74HC283) - 4-bit Adder
+## U_SP_ADD_LO (74HC283) - SP+IR Adder Low
 | Pin Name | Connects to Net |
 |---|---|
 | A1 | SP_Q0 |
@@ -712,9 +535,9 @@
 | B3 | IR_Q2 |
 | B4 | IR_Q3 |
 | C0 | GND |
-| C4 | ADD1_C4 |
+| C4 | SP_ADD_CARRY |
 
-## U_ADD2 (74HC283) - 4-bit Adder
+## U_SP_ADD_HI (74HC283) - SP+IR Adder High
 | Pin Name | Connects to Net |
 |---|---|
 | A1 | SP_Q4 |
@@ -725,83 +548,45 @@
 | B2 | GND |
 | B3 | GND |
 | B4 | GND |
-| C0 | ADD1_C4 |
+| C0 | SP_ADD_CARRY |
 
-## U_SP_ADDR_LO (74HC245) - 8-bit Transceiver
+## U_SP_DATA (74HC245) - SP+offset to Data Bus
 | Pin Name | Connects to Net |
 |---|---|
 | DIR | VCC |
-| ~OE | ~SP_ADDR_OE |
-| A0 | U_ADD1.S1 |
-| A1 | U_ADD1.S2 |
-| A2 | U_ADD1.S3 |
-| A3 | U_ADD1.S4 |
-| A4 | U_ADD2.S1 |
-| A5 | U_ADD2.S2 |
-| A6 | U_ADD2.S3 |
-| A7 | U_ADD2.S4 |
-| B0 | ADDR0 |
-| B1 | ADDR1 |
-| B2 | ADDR2 |
-| B3 | ADDR3 |
-| B4 | ADDR4 |
-| B5 | ADDR5 |
-| B6 | ADDR6 |
-| B7 | ADDR7 |
-| A0_OUT | U_ADD1.S1 |
-| A1_OUT | U_ADD1.S2 |
-| A2_OUT | U_ADD1.S3 |
-| A3_OUT | U_ADD1.S4 |
-| A4_OUT | U_ADD2.S1 |
-| A5_OUT | U_ADD2.S2 |
-| A6_OUT | U_ADD2.S3 |
-| A7_OUT | U_ADD2.S4 |
-| B0_OUT | ADDR0 |
-| B1_OUT | ADDR1 |
-| B2_OUT | ADDR2 |
-| B3_OUT | ADDR3 |
-| B4_OUT | ADDR4 |
-| B5_OUT | ADDR5 |
-| B6_OUT | ADDR6 |
-| B7_OUT | ADDR7 |
-
-## U_SP_ADDR_HI (74HC245) - 8-bit Transceiver
-| Pin Name | Connects to Net |
-|---|---|
-| DIR | VCC |
-| ~OE | ~SP_ADDR_OE |
-| A0 | VCC |
-| A1 | VCC |
-| A2 | VCC |
-| A3 | VCC |
-| A4 | VCC |
-| A5 | VCC |
-| A6 | VCC |
-| A7 | VCC |
-| B0 | ADDR8 |
-| B1 | ADDR9 |
-| B2 | ADDR10 |
-| B3 | ADDR11 |
-| B4 | ADDR12 |
-| B5 | ADDR13 |
-| B6 | ADDR14 |
-| B7 | ADDR15 |
-| A0_OUT | VCC |
-| A1_OUT | VCC |
-| A2_OUT | VCC |
-| A3_OUT | VCC |
-| A4_OUT | VCC |
-| A5_OUT | VCC |
-| A6_OUT | VCC |
-| A7_OUT | VCC |
-| B0_OUT | ADDR8 |
-| B1_OUT | ADDR9 |
-| B2_OUT | ADDR10 |
-| B3_OUT | ADDR11 |
-| B4_OUT | ADDR12 |
-| B5_OUT | ADDR13 |
-| B6_OUT | ADDR14 |
-| B7_OUT | ADDR15 |
+| ~OE | ~SP_OE |
+| A0 | SP_SUM0 |
+| A1 | SP_SUM1 |
+| A2 | SP_SUM2 |
+| A3 | SP_SUM3 |
+| A4 | SP_SUM4 |
+| A5 | SP_SUM5 |
+| A6 | SP_SUM6 |
+| A7 | SP_SUM7 |
+| B0 | DATA0 |
+| B1 | DATA1 |
+| B2 | DATA2 |
+| B3 | DATA3 |
+| B4 | DATA4 |
+| B5 | DATA5 |
+| B6 | DATA6 |
+| B7 | DATA7 |
+| A0_OUT | SP_SUM0 |
+| A1_OUT | SP_SUM1 |
+| A2_OUT | SP_SUM2 |
+| A3_OUT | SP_SUM3 |
+| A4_OUT | SP_SUM4 |
+| A5_OUT | SP_SUM5 |
+| A6_OUT | SP_SUM6 |
+| A7_OUT | SP_SUM7 |
+| B0_OUT | DATA0 |
+| B1_OUT | DATA1 |
+| B2_OUT | DATA2 |
+| B3_OUT | DATA3 |
+| B4_OUT | DATA4 |
+| B5_OUT | DATA5 |
+| B6_OUT | DATA6 |
+| B7_OUT | DATA7 |
 
 ## U_ALU (GAL22V10) - ALU PLD
 | Pin Name | Connects to Net |
@@ -822,9 +607,9 @@
 | B5 | B_Q5 |
 | B6 | B_Q6 |
 | B7 | B_Q7 |
-| OP0 | CTRL10 |
-| OP1 | CTRL11 |
-| OP2 | CTRL12 |
+| OP0 | CTRL8 |
+| OP1 | CTRL9 |
+| OP2 | CTRL10 |
 | ~OE | ~ALU_OE |
 | Q0 | DATA0 |
 | Q1 | DATA1 |
@@ -841,11 +626,8 @@
 ## U_AND_FLG (74HC08) - Quad AND
 | Pin Name | Connects to Net |
 |---|---|
-| 1A | ~RESET |
-| 1B | ~uIP_RST |
-| 4A | CTRL13 |
+| 4A | CTRL11 |
 | 4B | CLK |
-| 1Y | ~uIP_CLR |
 | 4Y | FLAGS_CLK |
 
 ## U_ROM (28C256) - 32KB EEPROM
@@ -923,16 +705,4 @@
 | Q5 | DATA5 |
 | Q6 | DATA6 |
 | Q7 | DATA7 |
-
-## U_INV_A15 (74HC04) - Hex Inverter
-| Pin Name | Connects to Net |
-|---|---|
-| 4A | ADDR15 |
-| 4Y | ~A15 |
-
-## U_INV_RST (74HC04) - Hex Inverter
-| Pin Name | Connects to Net |
-|---|---|
-| 5A | CTRL17 |
-| 5Y | ~uIP_RST |
 
