@@ -12,8 +12,13 @@ Syntax:
     JZ label        ; Jump if zero
     .org 0x0000     ; Set origin address
     .db 0x42        ; Define byte
-    .dw 0x1234      ; Define word (16-bit, big-endian)
+    .dw 0x1234      ; Define word (16-bit, little-endian)
     .equ NAME 42    ; Define constant
+
+Page boundary rule:
+    Instructions must not span 256-byte page boundaries.
+    The assembler automatically inserts NOP padding before any instruction
+    that would cross a boundary. An error is also raised if detected.
 
 Usage:
     python assembler.py input.asm [-o output.bin] [--listing]
@@ -27,8 +32,6 @@ import re
 # Instruction definitions
 # ---------------------------------------------------------------------------
 
-# Opcode table: mnemonic -> (base_opcode, operand_type)
-# operand_type: None, 'imm', 'addr_mem', 'addr_jump'
 OPCODES = {
     'NOP': (0x00, None),
     'LDA': None,  # Handled specially
@@ -50,14 +53,14 @@ OPCODES = {
     'SHL': (0x26, None),
     'SHR': (0x27, None),
     'CMP': (0x28, None),
-    'PSA': (0x30, None),  # PUSH A
-    'PPA': (0x40, None),  # POP A
-    'PSB': (0x50, None),  # PUSH B
-    'PPB': (0x60, None),  # POP B
-    'LSA': None,  # Handled specially (0xC0-0xCF)
-    'SSA': None,  # Handled specially (0xD0-0xDF)
-    'LSB': None,  # Handled specially (0xE0-0xEF)
-    'SSB': None,  # Handled specially (0xF0-0xFF)
+    'PSA': (0x30, None),   # PUSH A
+    'PPA': (0x40, None),   # POP A
+    'PSB': (0x50, None),   # PUSH B
+    'PPB': (0x60, None),   # POP B
+    'LSA': (0xC0, 'imm'),  # Load SP-relative to A (2 bytes: opcode + offset)
+    'SSA': (0xD0, 'imm'),  # Store SP-relative from A
+    'LSB': (0xE0, 'imm'),  # Load SP-relative to B
+    'SSB': (0xF0, 'imm'),  # Store SP-relative from B
     'JMP': (0x70, 'addr_jump'),
     'JZ':  (0x71, 'addr_jump'),
     'JNZ': (0x72, 'addr_jump'),
@@ -71,7 +74,6 @@ OPCODES = {
     'OUT': (0x84, None),
 }
 
-# Aliases
 ALIASES = {
     'PUSH': None,   # Handled specially
     'POP':  None,   # Handled specially
@@ -110,7 +112,6 @@ def tokenize_line(line):
     Parse an assembly line into components.
     Returns (label, mnemonic, operand, comment).
     """
-    # Strip comments
     comment = None
     if ';' in line:
         idx = line.index(';')
@@ -121,7 +122,6 @@ def tokenize_line(line):
     if not line:
         return None, None, None, comment
 
-    # Check for label
     label = None
     if ':' in line:
         colon_idx = line.index(':')
@@ -131,7 +131,6 @@ def tokenize_line(line):
     if not line:
         return label, None, None, comment
 
-    # Split mnemonic and operand
     parts = line.split(None, 1)
     mnemonic = parts[0].upper()
     operand = parts[1].strip() if len(parts) > 1 else None
@@ -140,7 +139,7 @@ def tokenize_line(line):
 
 
 class Assembler:
-    """Two-pass assembler for the breadboard CPU."""
+    """Two-pass assembler for the breadboard CPU with page-boundary NOP insertion."""
 
     def __init__(self):
         self.labels = {}
@@ -155,15 +154,12 @@ class Assembler:
         """Resolve a value: number literal, label, or constant."""
         s = s.strip()
 
-        # Check for constant
         if s.upper() in self.constants:
             return self.constants[s.upper()]
 
-        # Check for label
         if s in self.labels:
             return self.labels[s]
 
-        # Check for expression: label + offset or label - offset
         m = re.match(r'(\w+)\s*([+-])\s*(\w+)', s)
         if m:
             base = self.resolve_value(m.group(1), line_num)
@@ -173,18 +169,21 @@ class Assembler:
             else:
                 return base - offset
 
-        # Try parsing as number
         try:
             return parse_number(s)
         except ValueError:
             raise AssemblerError(f"Undefined symbol: {s}", line_num)
+
+    def _instruction_size(self, mnemonic, operand, line_num):
+        """Return the total byte size of an instruction (opcode + operands)."""
+        opc, op_bytes = self._parse_operand(mnemonic, operand, line_num, pass_num=1)
+        return 1 + len(op_bytes)
 
     def _parse_operand(self, mnemonic, operand, line_num, pass_num):
         """
         Parse operand for a mnemonic.
         Returns (opcode_byte, operand_bytes_list).
         """
-        # Handle LDA variants
         if mnemonic == 'LDA':
             if operand is None:
                 raise AssemblerError("LDA requires an operand", line_num)
@@ -193,11 +192,10 @@ class Assembler:
                 return 0x01, [val & 0xFF]
             elif operand.startswith('[') and operand.endswith(']'):
                 val = self.resolve_value(operand[1:-1], line_num) if pass_num == 2 else 0
-                return 0x05, [val & 0xFF, (val >> 8) & 0xFF] # LDA [addr16]
+                return 0x05, [val & 0xFF, (val >> 8) & 0xFF]
             else:
                 raise AssemblerError(f"Invalid LDA operand: {operand}", line_num)
 
-        # Handle LDB variants
         if mnemonic == 'LDB':
             if operand is None:
                 raise AssemblerError("LDB requires an operand", line_num)
@@ -206,11 +204,10 @@ class Assembler:
                 return 0x02, [val & 0xFF]
             elif operand.startswith('[') and operand.endswith(']'):
                 val = self.resolve_value(operand[1:-1], line_num) if pass_num == 2 else 0
-                return 0x07, [val & 0xFF, (val >> 8) & 0xFF] # LDB [addr16]
+                return 0x07, [val & 0xFF, (val >> 8) & 0xFF]
             else:
                 raise AssemblerError(f"Invalid LDB operand: {operand}", line_num)
                 
-        # Handle LDC, LDD
         if mnemonic in ('LDC', 'LDD'):
             if operand is None or not operand.startswith('#'):
                 raise AssemblerError(f"{mnemonic} requires an immediate operand (#)", line_num)
@@ -218,17 +215,6 @@ class Assembler:
             base = 0x03 if mnemonic == 'LDC' else 0x04
             return base, [val & 0xFF]
             
-        # Handle LSA, SSA, LSB, SSB
-        if mnemonic in ('LSA', 'SSA', 'LSB', 'SSB'):
-            if operand is None:
-                raise AssemblerError(f"{mnemonic} requires an offset 0-15", line_num)
-            val = self.resolve_value(operand, line_num) if pass_num == 2 else 0
-            if pass_num == 2 and (val < 0 or val > 15):
-                raise AssemblerError(f"{mnemonic} offset must be 0-15 (got {val})", line_num)
-            base = {'LSA': 0xC0, 'SSA': 0xD0, 'LSB': 0xE0, 'SSB': 0xF0}[mnemonic]
-            return base + (val & 0x0F), []
-
-        # Handle PUSH/POP aliases
         if mnemonic == 'PUSH':
             if operand and operand.upper() == 'A':
                 return 0x30, []
@@ -253,7 +239,6 @@ class Assembler:
             else:
                 raise AssemblerError("POP requires A, B, C, or D", line_num)
 
-        # Handle MVA
         if mnemonic == 'MVA':
             if operand is None:
                  raise AssemblerError("MVA requires an operand (B, C, or D)", line_num)
@@ -263,7 +248,6 @@ class Assembler:
             elif op == 'D': return 0x1A, []
             else: raise AssemblerError(f"Invalid MVA source: {op}", line_num)
 
-        # Handle MOV alias
         if mnemonic == 'MOV':
             if operand:
                 parts = [p.strip().upper() for p in operand.split(',')]
@@ -275,7 +259,6 @@ class Assembler:
                         return {'B': 0x1B, 'C': 0x1C, 'D': 0x1D}[dst], []
             raise AssemblerError("MOV requires A,reg or reg,A (reg=B,C,D)", line_num)
 
-        # Look up in opcode table
         if mnemonic == 'CALL':
             mnemonic = 'CAL'
 
@@ -286,7 +269,6 @@ class Assembler:
         base_opcode, op_type = entry
 
         if op_type is None:
-            # No operand
             return base_opcode, []
 
         elif op_type == 'imm':
@@ -339,7 +321,6 @@ class Assembler:
             return -1
 
         elif mnemonic == '.DB':
-            # Define bytes: .db 0x42, 0x43, "hello"
             bytes_out = []
             for part in self._split_data(operand):
                 part = part.strip()
@@ -355,19 +336,17 @@ class Assembler:
             return len(bytes_out)
 
         elif mnemonic == '.DW':
-            # Define words (16-bit, big-endian)
             words = [p.strip() for p in operand.split(',')]
             count = 0
             for w in words:
                 val = self.resolve_value(w, line_num) if pass_num == 2 else 0
                 if pass_num == 2:
-                    self._emit((val >> 8) & 0xFF)
                     self._emit(val & 0xFF)
+                    self._emit((val >> 8) & 0xFF)
                 count += 2
             return count
 
         elif mnemonic == '.DS':
-            # Define space (reserve bytes)
             val = self.resolve_value(operand, line_num) if operand else 1
             if pass_num == 2:
                 for _ in range(val):
@@ -396,44 +375,88 @@ class Assembler:
 
     def _emit(self, byte):
         """Emit a byte at the current address."""
-        # Extend output array if needed
         offset = self.current_addr - self.origin
         while len(self.output) <= offset:
             self.output.append(0)
         self.output[offset] = byte & 0xFF
         self.current_addr += 1
 
-    def assemble(self, source, filename="<input>"):
-        """
-        Assemble source code.
-        Returns (binary_data, listing).
-        """
-        lines = source.split('\n')
+    def _crosses_page(self, addr, size):
+        """Return True if an instruction of `size` bytes at `addr` crosses a 256-byte page boundary."""
+        page_start = addr & 0xFF00
+        page_end = (addr + size - 1) & 0xFF00
+        return page_start != page_end
 
-        # Pass 1: collect labels and calculate addresses
+    def _count_nops_needed(self, addr, size):
+        """Return number of NOP bytes needed before addr to align instruction within a page."""
+        if size > 256:
+            raise AssemblerError(f"Instruction of size {size} at 0x{addr:04X} is larger than a page (256 bytes)!")
+        if not self._crosses_page(addr, size):
+            return 0
+        # Pad to next page boundary
+        next_page = (addr & 0xFF00) + 0x100
+        return next_page - addr
+
+    def _pass1_with_alignment(self, lines):
+        """
+        Extended pass 1: compute addresses AND insert virtual NOP padding.
+        Returns a list of (line_num, line_text, nops_before) tuples.
+        """
         self.current_addr = self.origin
+        aligned_lines = []
+
         for line_num, line in enumerate(lines, 1):
             try:
                 label, mnemonic, operand, comment = tokenize_line(line)
 
+                nops_before = 0
+
+                if mnemonic is not None and not mnemonic.startswith('.'):
+                    # Calculate instruction size
+                    try:
+                        opc, operand_bytes = self._parse_operand(mnemonic, operand, line_num, pass_num=1)
+                        size = 1 + len(operand_bytes)
+                    except AssemblerError:
+                        size = 1  # Unknown, assume 1 for now
+
+                    # Check if we need NOP padding
+                    nops_before = self._count_nops_needed(self.current_addr, size)
+                    if nops_before > 0:
+                        self.current_addr += nops_before
+
+                # Record label AFTER any NOP padding (so label points to actual instruction)
                 if label:
                     self.labels[label] = self.current_addr
 
-                if mnemonic is None:
-                    continue
+                if mnemonic is not None:
+                    if mnemonic.startswith('.'):
+                        result = self._process_directive(mnemonic, operand, line_num, pass_num=1)
+                        if result is not None and result >= 0:
+                            self.current_addr += result
+                    else:
+                        try:
+                            opc, operand_bytes = self._parse_operand(mnemonic, operand, line_num, pass_num=1)
+                            self.current_addr += 1 + len(operand_bytes)
+                        except AssemblerError as e:
+                            self.errors.append(str(e))
 
-                if mnemonic.startswith('.'):
-                    result = self._process_directive(mnemonic, operand, line_num, pass_num=1)
-                    if result is not None and result >= 0:
-                        self.current_addr += result
-                    continue
-
-                # Instruction: calculate size
-                opc, operand_bytes = self._parse_operand(mnemonic, operand, line_num, pass_num=1)
-                self.current_addr += 1 + len(operand_bytes)
+                aligned_lines.append((line_num, line, nops_before))
 
             except AssemblerError as e:
                 self.errors.append(str(e))
+                aligned_lines.append((line_num, line, 0))
+
+        return aligned_lines
+
+    def assemble(self, source, filename="<input>"):
+        """
+        Assemble source code with automatic NOP padding for page alignment.
+        Returns (binary_data, listing).
+        """
+        lines = source.split('\n')
+
+        # Pass 1: collect labels, compute addresses, determine NOP padding
+        aligned_lines = self._pass1_with_alignment(lines)
 
         if self.errors:
             return None, self.errors
@@ -442,9 +465,18 @@ class Assembler:
         self.current_addr = self.origin
         self.output = bytearray()
 
-        for line_num, line in enumerate(lines, 1):
+        for line_num, line, nops_before in aligned_lines:
             try:
                 label, mnemonic, operand, comment = tokenize_line(line)
+
+                # Emit NOP padding if needed
+                if nops_before > 0:
+                    pad_addr = self.current_addr
+                    for _ in range(nops_before):
+                        self._emit(0x00)  # NOP opcode
+                    self.listing.append(
+                        f"0x{pad_addr:04X}: {'00 ' * nops_before:12s}  ; [page-align NOP padding x{nops_before}]"
+                    )
 
                 if mnemonic is None:
                     continue
@@ -455,11 +487,20 @@ class Assembler:
 
                 addr = self.current_addr
                 opc, operand_bytes = self._parse_operand(mnemonic, operand, line_num, pass_num=2)
+
+                # Safety check: should never happen if pass 1 padding was correct
+                size = 1 + len(operand_bytes)
+                if self._crosses_page(addr, size):
+                    raise AssemblerError(
+                        f"Instruction at 0x{addr:04X} (size {size}) crosses page boundary! "
+                        f"This is a bug in the assembler's NOP insertion.",
+                        line_num
+                    )
+
                 self._emit(opc)
                 for b in operand_bytes:
                     self._emit(b)
 
-                # Add listing entry
                 all_bytes = [opc] + operand_bytes
                 hex_str = " ".join(f"{b:02X}" for b in all_bytes)
                 self.listing.append(f"0x{addr:04X}: {hex_str:12s}  {line.strip()}")
@@ -499,7 +540,6 @@ def main():
     output_file = None
     show_listing = "--listing" in sys.argv
 
-    # Parse -o option
     if "-o" in sys.argv:
         idx = sys.argv.index("-o")
         if idx + 1 < len(sys.argv):
@@ -520,7 +560,7 @@ def main():
         for entry in listing:
             print(f"  {entry}")
 
-    # Also print labels
+    # Print labels
     asm = Assembler()
     with open(input_file, 'r') as f:
         asm.assemble(f.read())

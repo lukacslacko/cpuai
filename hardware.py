@@ -3,6 +3,14 @@
 Structural Hardware Emulator for the Breadboard CPU.
 Simulates individual 74HC series chips, memory, and GALs.
 Also generates wiring documentation and Bill of Materials automatically.
+
+Architecture: H/L D-to-A register model.
+  - All general-purpose registers (A, B, C, D, IR, H, L, SP) connect to DATA bus only.
+  - H register always drives ADDR[15:8].
+  - L register always drives ADDR[7:0].
+  - No separate address-bus buffers for IP, CD, or SP.
+  - IP (4x 74HC161) is read via DS_IPL (lo) / DS_IPH (hi) onto data bus.
+  - Fetch: DS_IPL|DD_L (uIP=0), DS_IPH|DD_H (uIP=1), DS_MEM|DD_IR|IP_INC (uIP=2).
 """
 
 import sys
@@ -112,7 +120,6 @@ class System:
                 f.write(f"## {chip.ref} ({chip.part_name})\n")
                 f.write(f"*{chip.desc}*\n\n")
                 
-                # Sort pins systematically (inputs then outputs)
                 all_pins = chip.inputs + chip.outputs
                 
                 f.write("| Pin | Net Connection |\n")
@@ -361,14 +368,16 @@ def build_cpu():
     data_bus = sys.bus("DATA", 8, pull=0)
     addr_bus = sys.bus("ADDR", 16, pull=0)
     
-    # Micro-Sequencer
+    # =========================================================================
+    # Micro-Sequencer (uIP)
+    # =========================================================================
     uip = sys.add(IC_74HC161("U2", "uIP Counter"))
-    sys.wire(uip, "CLK", sys.net("~CLK")) # Clock on falling edge to avoid IR/ROM race condition
-    sys.wire(uip, "~CLR", sys.net("~uIP_CLR"))
+    sys.wire(uip, "CLK", sys.net("~CLK"))  # Clock on falling edge of main CLK
+    sys.wire(uip, "~CLR", sys.net("~RESET"))  # Only hardware reset clears uIP async
     sys.wire(uip, "ENT", sys.net("VCC"))
     sys.wire(uip, "ENP", sys.net("VCC"))
-    sys.wire(uip, "~LOAD", sys.net("VCC"))
-    for i in ['A', 'B', 'C', 'D']: sys.wire(uip, i, sys.net("GND"))
+    sys.wire(uip, "~LOAD", sys.net("~uIP_RST"))  # Synchronous load-to-0 on uIP_RST
+    for i in ['A', 'B', 'C', 'D']: sys.wire(uip, i, sys.net("GND"))  # Load value = 0
         
     flags_reg = sys.add(IC_74HC574("U11", "Flags Register"))
     sys.wire(flags_reg, "CLK", sys.net("FLAGS_CLK"))
@@ -403,7 +412,32 @@ def build_cpu():
         sys.wire(mc_b, f"Q{i}", sys.net(f"CTRL{i+8}"))
         sys.wire(mc_c, f"Q{i}", sys.net(f"CTRL{i+16}"))
         
+    # =========================================================================
+    # Clock Inverter
+    # =========================================================================
+    inv1 = sys.add(IC_74HC04("UINV1", "Clock Inverter"))
+    sys.wire(inv1, "1A", sys.net("CLK"))
+    sys.wire(inv1, "1Y", sys.net("~CLK"))
+    
+    # =========================================================================
     # Control Decode
+    # Control word layout:
+    #   bits  0-3: DS  (data bus source, 4-bit, 16 sources)
+    #   bits  4-7: DD  (data bus dest,   4-bit, 16 dests)
+    #   bits  8-9: unused
+    #   bits 10-12: ALU_OP
+    #   bit  13: FLAGS_IN
+    #   bit  14: IP_INC
+    #   bit  15: SP_INC
+    #   bit  16: SP_DEC
+    #   bit  17: uIP_RST
+    #   bit  18: HLT
+    #
+    # DS values:  0=none, 1=A, 2=B, 3=C, 4=D, 5=ALU, 6=MEM, 7=IPL, 8=IPH, 9=SP, 10=0xFF
+    # DD values:  0=none, 1=A, 2=B, 3=C, 4=D, 5=IR,  6=MEM, 7=H,   8=L,   9=IPL, 10=IPH, 11=SP, 12=OUT
+    # =========================================================================
+
+    # Source decoder: 4-to-16 (CTRL0-3)
     src_dec = sys.add(IC_74HC154("U5", "Bus Source Decoder"))
     sys.wire(src_dec, "~G1", sys.net("GND"))
     sys.wire(src_dec, "~G2", sys.net("GND"))
@@ -411,11 +445,8 @@ def build_cpu():
     sys.wire(src_dec, "B", sys.net("CTRL1"))
     sys.wire(src_dec, "C", sys.net("CTRL2"))
     sys.wire(src_dec, "D", sys.net("CTRL3"))
-    
-    inv1 = sys.add(IC_74HC04("UINV1", "Clock Inverter"))
-    sys.wire(inv1, "1A", sys.net("CLK"))
-    sys.wire(inv1, "1Y", sys.net("~CLK"))
-    
+
+    # Destination decoder: 4-to-16, clocked (CTRL4-7) - clocked on falling CLK
     dst_dec = sys.add(IC_74HC154("U6", "Bus Dest Decoder"))
     sys.wire(dst_dec, "~G1", sys.net("~CLK"))
     sys.wire(dst_dec, "~G2", sys.net("GND"))
@@ -423,22 +454,15 @@ def build_cpu():
     sys.wire(dst_dec, "B", sys.net("CTRL5"))
     sys.wire(dst_dec, "C", sys.net("CTRL6"))
     sys.wire(dst_dec, "D", sys.net("CTRL7"))
-    
+
     def wire_dst(y_num, name):
+        """Wire a dest decoder output, creating CLK signal via inverter."""
         sys.wire(dst_dec, f"~Y{y_num}", sys.net(f"~DST_{name}"))
         inv = sys.add(IC_74HC04(f"UINV_{name}"))
         sys.wire(inv, "1A", sys.net(f"~DST_{name}"))
         sys.wire(inv, "1Y", sys.net(f"{name}_CLK"))
 
-    # Dest map: 1:A, 2:B, 3:C, 4:D, 5:IR, 6:MEM, 7:IP_LO, 8:IP_HI, 9:SP, 10:OUT
-    wire_dst(1, "A")
-    wire_dst(2, "B")
-    wire_dst(3, "C")
-    wire_dst(4, "D")
-    wire_dst(5, "IR")
-    sys.wire(dst_dec, "~Y6", sys.net("~MEM_WE"))  # Level sensitive
-    wire_dst(10, "OUT")
-    
+    # Unclocked decoder (for level-sensitive signals: MEM_WE, IP load, SP load)
     dst_dec_uc = sys.add(IC_74HC154("U6B", "Unclocked Dest Decoder"))
     sys.wire(dst_dec_uc, "~G1", sys.net("GND"))
     sys.wire(dst_dec_uc, "~G2", sys.net("GND"))
@@ -446,22 +470,41 @@ def build_cpu():
     sys.wire(dst_dec_uc, "B", sys.net("CTRL5"))
     sys.wire(dst_dec_uc, "C", sys.net("CTRL6"))
     sys.wire(dst_dec_uc, "D", sys.net("CTRL7"))
-    sys.wire(dst_dec_uc, "~Y7", sys.net("~UC_IP_LO"))
-    sys.wire(dst_dec_uc, "~Y8", sys.net("~UC_IP_HI"))
-    sys.wire(dst_dec_uc, "~Y9", sys.net("~UC_SP"))
-    
-    # Source map
-    sys.wire(src_dec, "~Y1", sys.net("~A_OE"))
-    sys.wire(src_dec, "~Y2", sys.net("~B_OE"))
-    sys.wire(src_dec, "~Y3", sys.net("~C_OE"))
-    sys.wire(src_dec, "~Y4", sys.net("~D_OE"))
-    sys.wire(src_dec, "~Y5", sys.net("~ALU_OE"))
-    sys.wire(src_dec, "~Y6", sys.net("~MEM_OE"))
-    sys.wire(src_dec, "~Y7", sys.net("~IP_LO_OE"))
-    sys.wire(src_dec, "~Y8", sys.net("~IP_HI_OE"))
-    sys.wire(src_dec, "~Y9", sys.net("~SP_OE"))
-    
-    # Main Registers
+
+    # Dest map:
+    #  1: A      2: B     3: C    4: D    5: IR
+    #  6: MEM    7: H     8: L
+    #  9: IPL   10: IPH  11: SP  12: OUT
+    wire_dst(1, "A")
+    wire_dst(2, "B")
+    wire_dst(3, "C")
+    wire_dst(4, "D")
+    wire_dst(5, "IR")
+    sys.wire(dst_dec_uc, "~Y6", sys.net("~MEM_WE"))     # Level sensitive
+    wire_dst(7, "H")
+    wire_dst(8, "L")
+    sys.wire(dst_dec_uc, "~Y9",  sys.net("~UC_IP_LO"))   # Level sensitive IPL load
+    sys.wire(dst_dec_uc, "~Y10", sys.net("~UC_IP_HI"))   # Level sensitive IPH load
+    sys.wire(dst_dec_uc, "~Y11", sys.net("~UC_SP"))      # Level sensitive SP load
+    wire_dst(12, "OUT")
+
+    # Source map:
+    #  1: A   2: B   3: C   4: D   5: ALU   6: MEM
+    #  7: IPL  8: IPH  9: SP  10: CONST_FF
+    sys.wire(src_dec, "~Y1",  sys.net("~A_OE"))
+    sys.wire(src_dec, "~Y2",  sys.net("~B_OE"))
+    sys.wire(src_dec, "~Y3",  sys.net("~C_OE"))
+    sys.wire(src_dec, "~Y4",  sys.net("~D_OE"))
+    sys.wire(src_dec, "~Y5",  sys.net("~ALU_OE"))
+    sys.wire(src_dec, "~Y6",  sys.net("~MEM_OE"))
+    sys.wire(src_dec, "~Y7",  sys.net("~IPL_OE"))
+    sys.wire(src_dec, "~Y8",  sys.net("~IPH_OE"))
+    sys.wire(src_dec, "~Y9",  sys.net("~SP_OE"))
+    sys.wire(src_dec, "~Y10", sys.net("~CONST_FF_OE"))
+
+    # =========================================================================
+    # Main Registers (A, B, C, D) - connect only to data bus
+    # =========================================================================
     def add_reg(name, oe_net_name):
         reg = sys.add(IC_74HC574(f"U_{name}", f"{name} Register"))
         sys.wire(reg, "CLK", sys.net(f"{name}_CLK"))
@@ -476,41 +519,59 @@ def build_cpu():
     sys.reg_b = add_reg("B", "~B_OE")
     sys.reg_c = add_reg("C", "~C_OE")
     sys.reg_d = add_reg("D", "~D_OE")
-    
-    # ADDR Source Decode (Bits 8-9) -> 0: IP, 1: CD, 2: SP_IDX
-    addr_dec = sys.add(IC_74HC138("U_ADDR_DEC", "ADDR Source Decode"))
-    sys.wire(addr_dec, "A", sys.net("CTRL8"))
-    sys.wire(addr_dec, "B", sys.net("CTRL9"))
-    sys.wire(addr_dec, "C", sys.net("GND"))
-    sys.wire(addr_dec, "~G2A", sys.net("GND"))
-    sys.wire(addr_dec, "~G2B", sys.net("GND"))
-    sys.wire(addr_dec, "G1", sys.net("VCC"))
-    sys.wire(addr_dec, "~Y0", sys.net("~IP_ADDR_OE"))
-    sys.wire(addr_dec, "~Y1", sys.net("~CD_ADDR_OE"))
-    sys.wire(addr_dec, "~Y2", sys.net("~SP_ADDR_OE"))
-    
-    # CD -> ADDR_BUS buffers
-    cd_buf_lo = sys.add(IC_74HC245("U_CD_BUF_LO", "C to ADDR_LO"))
-    cd_buf_hi = sys.add(IC_74HC245("U_CD_BUF_HI", "D to ADDR_HI"))
-    sys.wire(cd_buf_lo, "DIR", sys.net("VCC"))
-    sys.wire(cd_buf_hi, "DIR", sys.net("VCC"))
-    sys.wire(cd_buf_lo, "~OE", sys.net("~CD_ADDR_OE"))
-    sys.wire(cd_buf_hi, "~OE", sys.net("~CD_ADDR_OE"))
+
+    # =========================================================================
+    # H and L Registers - D-to-A address bus drivers
+    # H always drives ADDR[15:8], L always drives ADDR[7:0]
+    # ~OE tied to GND (always outputting to address bus)
+    # Input from data bus.
+    # =========================================================================
+    reg_h = sys.add(IC_74HC574("U_H", "H Register (ADDR[15:8])"))
+    sys.wire(reg_h, "CLK", sys.net("H_CLK"))
+    sys.wire(reg_h, "~OE", sys.net("GND"))   # Always driving address bus
     for i in range(8):
-        sys.wire(cd_buf_lo, f"A{i}", sys.net(f"C_Q{i}"))
-        sys.wire(cd_buf_lo, f"A{i}_OUT", sys.net(f"C_Q{i}")) # fake internally
-        sys.wire(cd_buf_lo, f"B{i}", addr_bus[i])
-        sys.wire(cd_buf_lo, f"B{i}_OUT", addr_bus[i])
-        
-        sys.wire(cd_buf_hi, f"A{i}", sys.net(f"D_Q{i}"))
-        sys.wire(cd_buf_hi, f"A{i}_OUT", sys.net(f"D_Q{i}"))
-        sys.wire(cd_buf_hi, f"B{i}", addr_bus[i+8])
-        sys.wire(cd_buf_hi, f"B{i}_OUT", addr_bus[i+8])
-        
-    # IP
+        sys.wire(reg_h, f"D{i}", data_bus[i])
+        sys.wire(reg_h, f"Q{i}", addr_bus[i + 8])
+    sys.reg_h = reg_h
+
+    reg_l = sys.add(IC_74HC574("U_L", "L Register (ADDR[7:0])"))
+    sys.wire(reg_l, "CLK", sys.net("L_CLK"))
+    sys.wire(reg_l, "~OE", sys.net("GND"))   # Always driving address bus
+    for i in range(8):
+        sys.wire(reg_l, f"D{i}", data_bus[i])
+        sys.wire(reg_l, f"Q{i}", addr_bus[i])
+    sys.reg_l = reg_l
+
+    # =========================================================================
+    # Constant 0xFF register - pre-wired, always outputs 0xFF to data bus
+    # when ~CONST_FF_OE is asserted.
+    # Implemented as a 74HC574 with all D inputs tied to VCC and ~OE controlled.
+    # =========================================================================
+    const_ff = sys.add(IC_74HC574("U_CONST_FF", "Constant 0xFF Source"))
+    sys.wire(const_ff, "CLK", sys.net("GND"))    # Never clocked (static)
+    sys.wire(const_ff, "~OE", sys.net("~CONST_FF_OE"))
+    for i in range(8):
+        sys.wire(const_ff, f"D{i}", sys.net("VCC"))   # All inputs = 1
+        sys.wire(const_ff, f"Q{i}", data_bus[i])
+    # Pre-load the constant register to 0xFF
+    const_ff.val = 0xFF
+
+    # =========================================================================
+    # IP (Instruction Pointer) - 4x 74HC161 cascaded 4-bit counters
+    # ip[0]: bits 0-3 (IPL low nibble)
+    # ip[1]: bits 4-7 (IPL high nibble)
+    # ip[2]: bits 8-11 (IPH low nibble)
+    # ip[3]: bits 12-15 (IPH high nibble)
+    #
+    # IP_INC (CTRL14): enables counter to increment on CLK rising edge.
+    # IPL load (~UC_IP_LO): loads ip[0] and ip[1] from data bus bits [3:0] and [7:4].
+    # IPH load (~UC_IP_HI): loads ip[2] and ip[3] from data bus bits [3:0] and [7:4].
+    # =========================================================================
     ip = [sys.add(IC_74HC161(f"U_IP{i}")) for i in range(4)]
     sys.ip = ip
-    sys.wire(ip[0], "ENT", sys.net("CTRL14"))
+    
+    # Carry chain for increment
+    sys.wire(ip[0], "ENT", sys.net("CTRL14"))   # IP_INC bit
     sys.wire(ip[0], "ENP", sys.net("CTRL14"))
     for i in range(3):
         sys.wire(ip[i+1], "ENT", sys.net(f"IP{i}_RCO"))
@@ -522,50 +583,37 @@ def build_cpu():
         sys.wire(ip[i], "~CLR", sys.net("~RESET"))
         sys.wire(ip[i], "~LOAD", sys.net("~UC_IP_LO" if i < 2 else "~UC_IP_HI"))
         for j, p in enumerate(['A', 'B', 'C', 'D']):
-            sys.wire(ip[i], p, data_bus[j + (0 if i%2==0 else 4)])
+            sys.wire(ip[i], p, data_bus[j + (0 if i % 2 == 0 else 4)])
         for j, p in enumerate(['QA', 'QB', 'QC', 'QD']):
             sys.net(f"IP_Q{i*4+j}").drivers.append(lambda idx=i, jdx=j: (ip[idx].val >> jdx) & 1)
-            
-    ip_addr_lo = sys.add(IC_74HC245("U_IP_ADDR_LO"))
-    ip_addr_hi = sys.add(IC_74HC245("U_IP_ADDR_HI"))
-    sys.wire(ip_addr_lo, "~OE", sys.net("~IP_ADDR_OE"))
-    sys.wire(ip_addr_hi, "~OE", sys.net("~IP_ADDR_OE"))
-    sys.wire(ip_addr_lo, "DIR", sys.net("VCC"))
-    sys.wire(ip_addr_hi, "DIR", sys.net("VCC"))
-    for i in range(8):
-        sys.wire(ip_addr_lo, f"A{i}", sys.net(f"IP_Q{i}"))
-        sys.wire(ip_addr_lo, f"A{i}_OUT", sys.net(f"IP_Q{i}"))
-        sys.wire(ip_addr_lo, f"B{i}", addr_bus[i])
-        sys.wire(ip_addr_lo, f"B{i}_OUT", addr_bus[i])
-        
-        sys.wire(ip_addr_hi, f"A{i}", sys.net(f"IP_Q{i+8}"))
-        sys.wire(ip_addr_hi, f"A{i}_OUT", sys.net(f"IP_Q{i+8}"))
-        sys.wire(ip_addr_hi, f"B{i}", addr_bus[i+8])
-        sys.wire(ip_addr_hi, f"B{i}_OUT", addr_bus[i+8])
-        
-    ip_data_lo = sys.add(IC_74HC245("U_IP_DATA_LO"))
-    ip_data_hi = sys.add(IC_74HC245("U_IP_DATA_HI"))
-    sys.wire(ip_data_lo, "~OE", sys.net("~IP_LO_OE"))
-    sys.wire(ip_data_hi, "~OE", sys.net("~IP_HI_OE"))
+
+    # IPL -> data bus buffer (DS_IPL = 7): ip[0] and ip[1] -> data_bus[0..7]
+    ip_data_lo = sys.add(IC_74HC245("U_IPL_DATA", "IPL to Data Bus"))
+    sys.wire(ip_data_lo, "~OE", sys.net("~IPL_OE"))
     sys.wire(ip_data_lo, "DIR", sys.net("VCC"))
-    sys.wire(ip_data_hi, "DIR", sys.net("VCC"))
     for i in range(8):
         sys.wire(ip_data_lo, f"A{i}", sys.net(f"IP_Q{i}"))
         sys.wire(ip_data_lo, f"A{i}_OUT", sys.net(f"IP_Q{i}"))
         sys.wire(ip_data_lo, f"B{i}", data_bus[i])
         sys.wire(ip_data_lo, f"B{i}_OUT", data_bus[i])
-        
+
+    # IPH -> data bus buffer (DS_IPH = 8): ip[2] and ip[3] -> data_bus[0..7]
+    ip_data_hi = sys.add(IC_74HC245("U_IPH_DATA", "IPH to Data Bus"))
+    sys.wire(ip_data_hi, "~OE", sys.net("~IPH_OE"))
+    sys.wire(ip_data_hi, "DIR", sys.net("VCC"))
+    for i in range(8):
         sys.wire(ip_data_hi, f"A{i}", sys.net(f"IP_Q{i+8}"))
         sys.wire(ip_data_hi, f"A{i}_OUT", sys.net(f"IP_Q{i+8}"))
         sys.wire(ip_data_hi, f"B{i}", data_bus[i])
         sys.wire(ip_data_hi, f"B{i}_OUT", data_bus[i])
 
-    # SP Tracker (193 cascades)
+    # =========================================================================
+    # SP (Stack Pointer) - 2x 74HC193 up/down counters (8-bit total)
+    # =========================================================================
     sp0 = sys.add(IC_74HC193("U_SP0"))
     sp1 = sys.add(IC_74HC193("U_SP1"))
     sys.sp = [sp0, sp1]
     
-    # Needs to default to HIGH and pulse LOW then HIGH. We can use NAND!
     class IC_74HC00(Chip):
         part_name = "74HC00"
         def __init__(self, ref, desc="Quad NAND"):
@@ -574,22 +622,20 @@ def build_cpu():
             for i in range(1, 5): self.write(f'{i}Y', 1 - (self.read(f'{i}A') & self.read(f'{i}B')))
 
     nand_sp = sys.add(IC_74HC00("U_NAND_SP"))
-    sys.wire(nand_sp, "1A", sys.net("CTRL15")) # SP_INC
-    sys.wire(nand_sp, "1B", sys.net("CLK"))    # Pulse LOW on CLK=1, rise on CLK=0
+    sys.wire(nand_sp, "1A", sys.net("CTRL15"))  # SP_INC
+    sys.wire(nand_sp, "1B", sys.net("CLK"))
     sys.wire(nand_sp, "1Y", sys.net("SP_UP_NAND"))
     
-    sys.wire(nand_sp, "2A", sys.net("CTRL16")) # SP_DEC
+    sys.wire(nand_sp, "2A", sys.net("CTRL16"))  # SP_DEC
     sys.wire(nand_sp, "2B", sys.net("CLK"))
     sys.wire(nand_sp, "2Y", sys.net("SP_DN_NAND"))
     
-    # We want SP_UP and SP_DN to default HIGH. Wait, the NAND generates exactly this!
-    sys.wire(sp0, "UP", sys.net("SP_UP_NAND"))
+    sys.wire(sp0, "UP",   sys.net("SP_UP_NAND"))
     sys.wire(sp0, "DOWN", sys.net("SP_DN_NAND"))
-    sys.wire(sp0, "~CO", sys.net("SP0_CO"))
-    sys.wire(sp0, "~BO", sys.net("SP0_BO"))
+    sys.wire(sp0, "~CO",  sys.net("SP0_CO"))
+    sys.wire(sp0, "~BO",  sys.net("SP0_BO"))
     
-    # 193 cascade is direct: ~CO to UP, ~BO to DOWN
-    sys.wire(sp1, "UP", sys.net("SP0_CO"))
+    sys.wire(sp1, "UP",   sys.net("SP0_CO"))
     sys.wire(sp1, "DOWN", sys.net("SP0_BO"))
     
     for sp in [sp0, sp1]:
@@ -598,13 +644,14 @@ def build_cpu():
 
     for i, p in enumerate(['A', 'B', 'C', 'D']):
         sys.wire(sp0, p, data_bus[i])
-        sys.wire(sp1, p, data_bus[i+4])
+        sys.wire(sp1, p, data_bus[i + 4])
         
     for i, p in enumerate(['QA', 'QB', 'QC', 'QD']):
         sys.net(f"SP_Q{i}").drivers.append(lambda idx=i: (sp0.val >> idx) & 1)
         sys.net(f"SP_Q{i+4}").drivers.append(lambda idx=i: (sp1.val >> idx) & 1)
-        
-    sp_data = sys.add(IC_74HC245("U_SP_DATA"))
+
+    # SP -> data bus buffer (DS_SP = 9): sp0 and sp1 -> data_bus[0..7]
+    sp_data = sys.add(IC_74HC245("U_SP_DATA", "SP to Data Bus"))
     sys.wire(sp_data, "~OE", sys.net("~SP_OE"))
     sys.wire(sp_data, "DIR", sys.net("VCC"))
     for i in range(8):
@@ -612,47 +659,10 @@ def build_cpu():
         sys.wire(sp_data, f"A{i}_OUT", sys.net(f"SP_Q{i}"))
         sys.wire(sp_data, f"B{i}", data_bus[i])
         sys.wire(sp_data, f"B{i}_OUT", data_bus[i])
-        
-    add1 = sys.add(IC_74HC283("U_ADD1"))
-    add2 = sys.add(IC_74HC283("U_ADD2"))
-    sys.wire(add1, "C0", sys.net("GND"))
-    sys.wire(add1, "C4", sys.net("ADD1_C4"))
-    sys.wire(add2, "C0", sys.net("ADD1_C4"))
-    
-    for i in range(4):
-        sys.wire(add1, f"A{i+1}", sys.net(f"SP_Q{i}"))
-        sys.wire(add1, f"B{i+1}", sys.net(f"IR_Q{i}"))
-        sys.wire(add2, f"A{i+1}", sys.net(f"SP_Q{i+4}"))
-        sys.wire(add2, f"B{i+1}", sys.net("GND"))
-        
-    sp_addr_lo = sys.add(IC_74HC245("U_SP_ADDR_LO"))
-    sp_addr_hi = sys.add(IC_74HC245("U_SP_ADDR_HI"))
-    sys.wire(sp_addr_lo, "~OE", sys.net("~SP_ADDR_OE"))
-    sys.wire(sp_addr_lo, "DIR", sys.net("VCC"))
-    sys.wire(sp_addr_hi, "~OE", sys.net("~SP_ADDR_OE"))
-    sys.wire(sp_addr_hi, "DIR", sys.net("VCC"))
-    for i in range(4):
-        sys.wire(sp_addr_lo, f"A{i}", sys.net(f"U_ADD1.S{i+1}"))
-        sys.net(f"U_ADD1.S{i+1}").drivers.append(lambda idx=i: add1.out_states[f'S{idx+1}'])
-        sys.wire(sp_addr_lo, f"A{i}_OUT", sys.net(f"U_ADD1.S{i+1}"))
-        sys.wire(sp_addr_lo, f"B{i}", addr_bus[i])
-        sys.wire(sp_addr_lo, f"B{i}_OUT", addr_bus[i])
-        
-        sys.wire(sp_addr_lo, f"A{i+4}", sys.net(f"U_ADD2.S{i+1}"))
-        sys.net(f"U_ADD2.S{i+1}").drivers.append(lambda idx=i: add2.out_states[f'S{idx+1}'])
-        sys.wire(sp_addr_lo, f"A{i+4}_OUT", sys.net(f"U_ADD2.S{i+1}"))
-        sys.wire(sp_addr_lo, f"B{i+4}", addr_bus[i+4])
-        sys.wire(sp_addr_lo, f"B{i+4}_OUT", addr_bus[i+4])
-        
-        sys.wire(sp_addr_hi, f"A{i}", sys.net("VCC"))
-        sys.wire(sp_addr_hi, f"A{i}_OUT", sys.net("VCC"))
-        sys.wire(sp_addr_hi, f"B{i}", addr_bus[i+8])
-        sys.wire(sp_addr_hi, f"B{i}_OUT", addr_bus[i+8])
-        sys.wire(sp_addr_hi, f"A{i+4}", sys.net("VCC"))
-        sys.wire(sp_addr_hi, f"A{i+4}_OUT", sys.net("VCC"))
-        sys.wire(sp_addr_hi, f"B{i+4}", addr_bus[i+12])
-        sys.wire(sp_addr_hi, f"B{i+4}_OUT", addr_bus[i+12])
 
+    # =========================================================================
+    # ALU
+    # =========================================================================
     alu = sys.add(GAL_ALU("U_ALU"))
     sys.wire(alu, "~OE", sys.net("~ALU_OE"))
     for i in range(8):
@@ -668,11 +678,7 @@ def build_cpu():
     sys.wire(and_flg, "4A", sys.net("CTRL13"))
     sys.wire(and_flg, "4B", sys.net("CLK"))
     sys.wire(and_flg, "4Y", sys.net("FLAGS_CLK"))
-    
-    # Combine ~RESET and ~uIP_RST to clear uIP
-    sys.wire(and_flg, "1A", sys.net("~RESET"))
-    sys.wire(and_flg, "1B", sys.net("~uIP_RST"))
-    sys.wire(and_flg, "1Y", sys.net("~uIP_CLR"))
+    # Gates 1-3 unused
     
     sys.wire(alu, "Z", sys.net("ALU_Z"))
     sys.wire(alu, "C", sys.net("ALU_C"))
@@ -681,6 +687,10 @@ def build_cpu():
     sys.net("ALU_C").drivers.append(lambda: alu.out_states.get('C', 0))
     sys.net("ALU_N").drivers.append(lambda: alu.out_states.get('N', 0))
     
+    # =========================================================================
+    # Memory (ROM and RAM)
+    # ROM: 0x0000-0x7FFF (A15=0), RAM: 0x8000-0xFFFF (A15=1)
+    # =========================================================================
     rom = sys.add(IC_28C256("U_ROM"))
     ram = sys.add(IC_62256("U_RAM"))
     
@@ -688,13 +698,8 @@ def build_cpu():
     sys.wire(inv_a15, "4A", addr_bus[15])
     sys.wire(inv_a15, "4Y", sys.net("~A15"))
     
-    # ROM is mapped to 0x0000-0x7FFF (A15 = 0)
-    # So ROM ~CE is tied to A15 directly.
-    sys.wire(rom, "~CE", addr_bus[15])
-    
-    # RAM is mapped to 0x8000-0xFFFF (A15 = 1)
-    # So RAM ~CE is tied to ~A15.
-    sys.wire(ram, "~CE", sys.net("~A15"))
+    sys.wire(rom, "~CE", addr_bus[15])      # ROM: CE when A15=0
+    sys.wire(ram, "~CE", sys.net("~A15"))   # RAM: CE when A15=1
     
     sys.wire(rom, "~OE", sys.net("~MEM_OE"))
     sys.wire(ram, "~OE", sys.net("~MEM_OE"))
@@ -707,12 +712,14 @@ def build_cpu():
             sys.wire(mem, f"D{i}", data_bus[i])
             sys.wire(mem, f"Q{i}", data_bus[i])
             
+    # =========================================================================
+    # Reset / uIP_RST logic
+    # =========================================================================
     inv_rst = sys.add(IC_74HC04("U_INV_RST"))
     sys.wire(inv_rst, "5A", sys.net("CTRL17"))
     sys.wire(inv_rst, "5Y", sys.net("~uIP_RST"))
     
     # HLT Logic - CTRL18
-    # Not purely hardware, handled by sim
     sys.hlt_net = sys.net("CTRL18")
 
     sys.rom_chip = rom
@@ -729,11 +736,13 @@ def dump_state(sys_obj):
     B = sys_obj.reg_b.val
     C = sys_obj.reg_c.val
     D = sys_obj.reg_d.val
+    H = sys_obj.reg_h.val
+    L = sys_obj.reg_l.val
     ip_vals = [i.val for i in sys_obj.ip]
     IP = (ip_vals[3] << 12) | (ip_vals[2] << 8) | (ip_vals[1] << 4) | ip_vals[0]
     SP = (sys_obj.sp[1].val << 4) | sys_obj.sp[0].val
     
-    freg = sys_obj.chips[1] # U11
+    freg = sys_obj.chips[1]  # U11
     flags = f"{'Z' if freg.val & 1 else '.'}{'C' if freg.val & 2 else '.'}{'N' if freg.val & 4 else '.'}"
     
     ctrl = 0
@@ -743,13 +752,12 @@ def dump_state(sys_obj):
     ds = ctrl & 0x0F
     dd = (ctrl >> 4) & 0x0F
     
-    print(f"IP={IP:04X} SP={SP:02X} A={A:02X} B={B:02X} C={C:02X} D={D:02X} [{flags}] CW={ctrl:06X}")
+    print(f"IP={IP:04X} SP={SP:02X} H={H:02X} L={L:02X} A={A:02X} B={B:02X} C={C:02X} D={D:02X} [{flags}] CW={ctrl:06X}")
 
 def emit_wiring(sys):
     with open("docs/wiring.md", "w") as f:
         f.write("# Auto-generated Wiring Guide\n\n")
         
-        # Group by chip
         for chip in sys.chips:
             f.write(f"## {chip.ref} ({chip.part_name}) - {chip.desc}\n")
             f.write("| Pin Name | Connects to Net |\n")
@@ -782,11 +790,14 @@ def run_sim(sys_obj, max_cycles=5000):
     sys_obj.tick()
     sys_obj.reset_val = 1
 
+    # After reset, IP=0x0000. We need L and H to be set so the first fetch works.
+    # On first tick after reset, uIP=0 runs FETCH0: DS_IPL|DD_L -> L = 0x00.
+    # uIP=1: DS_IPH|DD_H -> H = 0x00. uIP=2: DS_MEM|DD_IR|IP_INC -> reads MEM[0x0000].
+    # This correctly fetches the first instruction.
     
     print("Running...")
     cycles = 0
     while cycles < max_cycles:
-        # Check HLT before tick
         if sys_obj.hlt_net.state == 1:
             print(f"Halted after {cycles} clock cycles.")
             dump_state(sys_obj)
@@ -795,7 +806,6 @@ def run_sim(sys_obj, max_cycles=5000):
         sys_obj.tick()
         cycles += 1
             
-        # Optional: Print trace on instruction boundary (uIP == 0)
         uip_val = sum((sys_obj.net(f"uIP_Q{i}").state << i) for i in range(4))
         if uip_val == 0: dump_state(sys_obj)
         
@@ -810,7 +820,6 @@ if __name__ == "__main__":
         cpu.emit_human_readable("docs/hardware_dump.md")
         print("Generated structural docs.")
     elif len(sys.argv) > 1:
-        # Load binary
         with open(sys.argv[1], "rb") as f:
             prog = f.read()
             
