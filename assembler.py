@@ -156,11 +156,23 @@ class Assembler:
         """Resolve a value: number literal, label, or constant."""
         s = s.strip()
 
+        # Lo/hi byte operators: <expr  >expr
+        if s.startswith('<'):
+            return self.resolve_value(s[1:], line_num) & 0xFF
+        if s.startswith('>'):
+            return (self.resolve_value(s[1:], line_num) >> 8) & 0xFF
+
         if s.upper() in self.constants:
             return self.constants[s.upper()]
 
         if s in self.labels:
             return self.labels[s]
+
+        # Case-insensitive label lookup
+        s_lower = s.lower()
+        for k, v in self.labels.items():
+            if k.lower() == s_lower:
+                return v
 
         m = re.match(r'(\w+)\s*([+-])\s*(\w+)', s)
         if m:
@@ -175,6 +187,7 @@ class Assembler:
             return parse_number(s)
         except ValueError:
             raise AssemblerError(f"Undefined symbol: {s}", line_num)
+
 
     def _instruction_size(self, mnemonic, operand, line_num):
         """Return the total byte size of an instruction (opcode + operands)."""
