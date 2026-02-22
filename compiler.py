@@ -742,7 +742,7 @@ class Compiler:
             self.compile_expr(node.left)
             self.emit("    PSA             ; save left")
             self.compile_expr(node.right)
-            self.emit("    MVB             ; B = right")
+            self.emit("    TAB             ; B = right")
             self.emit("    PPA             ; A = left")
             self.emit("    CMP             ; flags = A - B")
 
@@ -800,7 +800,7 @@ class Compiler:
                 self.compile_expr(node.left)
                 self.emit("    PUSH A          ; save left")
                 self.compile_expr(node.right)
-                self.emit("    MVB             ; B = right")
+                self.emit("    TAB             ; B = right")
                 self.emit("    POP A           ; A = left")
 
                 if node.op == '<<':

@@ -18,7 +18,7 @@ __while_1:
     LDA [0x8003]    ; count
     PSA             ; save left
     LDA #0
-    MVB             ; B = right
+    TAB             ; B = right
     PPA             ; A = left
     CMP             ; flags = A - B
     JC __endwhile_2
@@ -26,7 +26,7 @@ __while_1:
     LDA [0x8000]    ; prev
     PUSH A          ; save left
     LDA [0x8001]    ; curr
-    MVB             ; B = right
+    TAB             ; B = right
     POP A           ; A = left
     ADD
     STA [0x8002]    ; next
@@ -39,7 +39,7 @@ __while_1:
     LDA [0x8003]    ; count
     PUSH A          ; save left
     LDA #1
-    MVB             ; B = right
+    TAB             ; B = right
     POP A           ; A = left
     SUB
     STA [0x8003]    ; count

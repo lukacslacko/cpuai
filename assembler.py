@@ -40,10 +40,12 @@ OPCODES = {
     'LDD': None,  
     'STA': (0x06, 'addr_mem'),
     'STB': (0x08, 'addr_mem'),
-    'MVA': None,  
-    'MVB': (0x1B, None),
-    'MVC': (0x1C, None),
-    'MVD': (0x1D, None),
+    'TAB': (0x1B, None),   # Transfer A -> B
+    'TAC': (0x1C, None),   # Transfer A -> C
+    'TAD': (0x1D, None),   # Transfer A -> D
+    'TBA': (0x18, None),   # Transfer B -> A
+    'TCA': (0x19, None),   # Transfer C -> A
+    'TDA': (0x1A, None),   # Transfer D -> A
     'ADD': (0x20, None),
     'SUB': (0x21, None),
     'AND': (0x22, None),
@@ -239,14 +241,6 @@ class Assembler:
             else:
                 raise AssemblerError("POP requires A, B, C, or D", line_num)
 
-        if mnemonic == 'MVA':
-            if operand is None:
-                 raise AssemblerError("MVA requires an operand (B, C, or D)", line_num)
-            op = operand.strip().upper()
-            if op == 'B': return 0x18, []
-            elif op == 'C': return 0x19, []
-            elif op == 'D': return 0x1A, []
-            else: raise AssemblerError(f"Invalid MVA source: {op}", line_num)
 
         if mnemonic == 'MOV':
             if operand:

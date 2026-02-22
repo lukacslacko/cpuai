@@ -144,12 +144,12 @@ instruction(0x08, "STB [addr16]",
 def make_mov(opcode, name, src, dst):
     instruction(opcode, name, src | dst | uIP_RST)
 
-make_mov(0x18, "MVA B", DS_B, DD_A)
-make_mov(0x19, "MVA C", DS_C, DD_A)
-make_mov(0x1A, "MVA D", DS_D, DD_A)
-make_mov(0x1B, "MVB A", DS_A, DD_B)
-make_mov(0x1C, "MVC A", DS_A, DD_C)
-make_mov(0x1D, "MVD A", DS_A, DD_D)
+make_mov(0x18, "TBA", DS_B, DD_A)   # Transfer B -> A
+make_mov(0x19, "TCA", DS_C, DD_A)   # Transfer C -> A
+make_mov(0x1A, "TDA", DS_D, DD_A)   # Transfer D -> A
+make_mov(0x1B, "TAB", DS_A, DD_B)   # Transfer A -> B
+make_mov(0x1C, "TAC", DS_A, DD_C)   # Transfer A -> C
+make_mov(0x1D, "TAD", DS_A, DD_D)   # Transfer A -> D
 
 # 0x2x: ALU operations (A <- A op B)
 def make_alu(opcode, name, alu_op):
