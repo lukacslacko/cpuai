@@ -1,5 +1,5 @@
 import { ComponentPlacement } from "../../layout/PlacementResult.js";
-import { BOARD_ORIGIN_Y, RAIL_OFFSET } from "../../layout/holeToWorld.js";
+import { BOARD_TOP_Y } from "../../layout/holeToWorld.js";
 import { HOLE_PITCH, TOP_ROWS } from "../../breadboard/constants.js";
 
 export function drawBattery(ctx: CanvasRenderingContext2D, p: ComponentPlacement): void {
@@ -38,8 +38,8 @@ export function drawBattery(ctx: CanvasRenderingContext2D, p: ComponentPlacement
   ctx.font = "9px monospace";
   ctx.fillText("9V", cx, cy);
 
-  // VCC wire to top rail
-  const vccRailY = BOARD_ORIGIN_Y - RAIL_OFFSET * 2 + 8;
+  // VCC wire to top rail (matches holeToWorld "rail:top:pos" = BOARD_TOP_Y + 8)
+  const vccRailY = BOARD_TOP_Y + 8;
   ctx.strokeStyle = "#e53935";
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -47,8 +47,8 @@ export function drawBattery(ctx: CanvasRenderingContext2D, p: ComponentPlacement
   ctx.lineTo(cx, vccRailY);
   ctx.stroke();
 
-  // GND wire to second rail
-  const gndRailY = BOARD_ORIGIN_Y - RAIL_OFFSET * 2 + 8 + HOLE_PITCH;
+  // GND wire to second rail (matches holeToWorld "rail:top:neg" = BOARD_TOP_Y + 8 + HOLE_PITCH)
+  const gndRailY = BOARD_TOP_Y + 8 + HOLE_PITCH;
   void TOP_ROWS;
   ctx.strokeStyle = "#212121";
   ctx.lineWidth = 2;

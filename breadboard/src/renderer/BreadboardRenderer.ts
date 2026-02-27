@@ -10,6 +10,7 @@ import {
   BOARD_ORIGIN_Y,
   CENTER_GAP,
   RAIL_OFFSET,
+  BOARD_TOP_Y,
 } from "../layout/holeToWorld.js";
 
 const HOLE_RADIUS = 3.5;
@@ -30,7 +31,7 @@ export class BreadboardRenderer {
     const boardH =
       (topRows + botRows) * HOLE_PITCH + CENTER_GAP + RAIL_OFFSET * 3 + 40;
     const boardX = BOARD_ORIGIN_X - 20;
-    const boardY = BOARD_ORIGIN_Y - RAIL_OFFSET * 2 - 10;
+    const boardY = BOARD_TOP_Y;
 
     // PCB background
     ctx.fillStyle = BOARD_COLOR;
