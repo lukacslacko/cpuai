@@ -5,6 +5,7 @@ import { LED } from "../circuit/components/LED.js";
 import { Resistor } from "../circuit/components/Resistor.js";
 import { Button } from "../circuit/components/Button.js";
 import { IC74HC573 } from "../circuit/components/IC74HC573.js";
+import { IC74HC574 } from "../circuit/components/IC74HC574.js";
 import { ComponentPlacement, LayoutResult } from "./PlacementResult.js";
 import { placeBattery } from "./strategies/BatteryStrategy.js";
 import { placeButton } from "./strategies/ButtonStrategy.js";
@@ -60,7 +61,7 @@ export class Layouter {
       return placeButton(comp, col);
     }
 
-    if (comp instanceof IC74HC573) {
+    if (comp instanceof IC74HC573 || comp instanceof IC74HC574) {
       return placeDip20(comp, col);
     }
 
