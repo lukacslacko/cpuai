@@ -6,7 +6,7 @@ import { Camera } from "../renderer/Camera.js";
 import { Renderer } from "../renderer/Renderer.js";
 import { ControlBar } from "./ControlBar.js";
 import { InputHandler } from "./InputHandler.js";
-import { buildLedButtonCircuit } from "../examples/ledButton.js";
+import { buildLatchDemoCircuit } from "../examples/latchDemo.js";
 import { BOARD_ORIGIN_X, BOARD_ORIGIN_Y } from "../layout/holeToWorld.js";
 import { HOLE_PITCH, COL_MAX } from "../breadboard/constants.js";
 import { CENTER_GAP } from "../layout/holeToWorld.js";
@@ -24,7 +24,7 @@ export class App {
 
     // Build circuit
     const circuit = new Circuit();
-    buildLedButtonCircuit(circuit);
+    buildLatchDemoCircuit(circuit);
 
     // Layout
     const layouter = new Layouter();

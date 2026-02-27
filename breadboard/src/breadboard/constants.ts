@@ -3,7 +3,7 @@ export const HOLE_PITCH = 20;
 
 /** Number of main-grid columns (1-based) */
 export const COL_MIN = 1;
-export const COL_MAX = 63;
+export const COL_MAX = 90;
 export const COL_COUNT = COL_MAX - COL_MIN + 1;
 
 /** Row names for the two halves of the main grid */
