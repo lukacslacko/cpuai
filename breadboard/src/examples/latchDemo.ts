@@ -3,71 +3,80 @@ import { Battery } from "../circuit/components/Battery.js";
 import { Button } from "../circuit/components/Button.js";
 import { Resistor } from "../circuit/components/Resistor.js";
 import { LED, LEDColor } from "../circuit/components/LED.js";
-import { IC74HC574 } from "../circuit/components/IC74HC574.js";
+import { IC40193 } from "../circuit/components/IC40193.js";
 
-const LED_COLORS: LEDColor[] = [
-  "red", "orange", "yellow", "green",
-  "blue", "blue", "white", "red",
-];
+const LED_COLORS: LEDColor[] = ["green", "yellow", "orange", "red"];
 
 /**
- * Flip-flop demo circuit: 8 input buttons → 74HC574 → 8 LEDs
+ * Counter demo circuit: CD40193 4-bit up/down counter → 4 LEDs
  *
- * - D0–D7: each driven by a button (unpressed=LOW, pressed=HIGH)
- * - OE: tied to GND → always active (OE is active-LOW)
- * - CLK button: click to pulse clock HIGH; Q captures D on the rising edge
- * - Q0–Q7 → 330Ω resistor → LED → GND
+ * - UP button:   a → VCC, b → UP pin   (rising edge increments counter)
+ * - DOWN button: a → VCC, b → DOWN pin (rising edge decrements counter)
+ * - CLR button:  a → VCC, b → CLR pin  (active HIGH async reset to 0)
+ * - LOAD: tied to VCC (active-LOW, so HIGH = disabled, no parallel load)
+ * - A/B/C/D: tied to GND (load value = 0, not used while LOAD=HIGH)
+ * - QA–QD → 330Ω resistor → LED → GND (QA=LSB, QD=MSB)
+ * - CO (active-LOW carry out): not connected
+ * - BO (active-LOW borrow out): not connected
  *
  * Layout order (left to right):
- *   battery | D buttons 0-7 | 74HC574 | CLK button | resistors 0-7 | LEDs 0-7
+ *   battery | UP button | DOWN button | CLR button | 40193 | resistors 0-3 | LEDs 0-3
  */
 export function buildLatchDemoCircuit(circuit: Circuit): {
   battery: Battery;
-  ic: IC74HC574;
-  clkButton: Button;
-  dButtons: Button[];
+  ic: IC40193;
+  upButton: Button;
+  downButton: Button;
+  clrButton: Button;
   resistors: Resistor[];
   leds: LED[];
 } {
   const battery = new Battery();
-  const ic = new IC74HC574("74HC574");
-  const clkButton = new Button("CLK");
-  const dButtons = Array.from({ length: 8 }, (_, i) => new Button(`D${i}`));
-  const resistors = Array.from({ length: 8 }, (_, i) => new Resistor(`R${i}`));
+  const ic = new IC40193("40193");
+  const upButton = new Button("UP");
+  const downButton = new Button("DOWN");
+  const clrButton = new Button("CLR");
+  const resistors = Array.from({ length: 4 }, (_, i) => new Resistor(`R${i}`));
   const leds = LED_COLORS.map((c) => new LED(c));
 
   // Registration order controls layout order (left to right)
   circuit.addComponent(battery);
-  for (const b of dButtons) circuit.addComponent(b);
+  circuit.addComponent(upButton);
+  circuit.addComponent(downButton);
+  circuit.addComponent(clrButton);
   circuit.addComponent(ic);
-  circuit.addComponent(clkButton);
   for (const r of resistors) circuit.addComponent(r);
   for (const l of leds) circuit.addComponent(l);
 
   // Power rails
   circuit.connect(battery.vcc, ic.vcc);
-  // OE tied to GND so outputs are always enabled (OE is active-LOW)
-  circuit.connect(battery.gnd, ic.gnd, ic.oe);
+  circuit.connect(battery.gnd, ic.gnd);
 
-  // CLK button: a → VCC, b → CLK pin
-  // Toggle ON: CLK goes HIGH (rising edge) → Q captures current D values
-  // Toggle OFF: CLK goes LOW → flip-flop holds; next ON will capture again
-  circuit.connect(battery.vcc, clkButton.a);
-  circuit.connect(clkButton.b, ic.clk);
+  // LOAD tied HIGH (active-LOW → disabled, counter runs freely)
+  circuit.connect(battery.vcc, ic.load);
 
-  // D input buttons: a → VCC, b → D pin
-  // Unpressed: D=FLOAT→LOW; Pressed: D=HIGH
-  for (let i = 0; i < 8; i++) {
-    circuit.connect(battery.vcc, dButtons[i]!.a);
-    circuit.connect(dButtons[i]!.b, ic.d[i]!);
-  }
+  // Data inputs tied LOW (load value = 0; irrelevant while LOAD=HIGH)
+  circuit.connect(battery.gnd, ic.a, ic.b, ic.c, ic.d);
 
-  // Q outputs: Q → resistor → LED anode; LED cathode → GND
-  for (let i = 0; i < 8; i++) {
-    circuit.connect(ic.q[i]!, resistors[i]!.a);
+  // UP button: a → VCC, b → UP pin
+  circuit.connect(battery.vcc, upButton.a);
+  circuit.connect(upButton.b, ic.up);
+
+  // DOWN button: a → VCC, b → DOWN pin
+  circuit.connect(battery.vcc, downButton.a);
+  circuit.connect(downButton.b, ic.down);
+
+  // CLR button: a → VCC, b → CLR pin (active HIGH)
+  circuit.connect(battery.vcc, clrButton.a);
+  circuit.connect(clrButton.b, ic.clr);
+
+  // QA–QD outputs: Q → resistor → LED anode; LED cathode → GND
+  const outputs = [ic.qa, ic.qb, ic.qc, ic.qd];
+  for (let i = 0; i < 4; i++) {
+    circuit.connect(outputs[i]!, resistors[i]!.a);
     circuit.connect(resistors[i]!.b, leds[i]!.anode);
     circuit.connect(leds[i]!.cathode, battery.gnd);
   }
 
-  return { battery, ic, clkButton, dButtons, resistors, leds };
+  return { battery, ic, upButton, downButton, clrButton, resistors, leds };
 }
