@@ -1,9 +1,0 @@
-Assembled examples/multiply.asm -> examples/multiply.bin (233 bytes)
-
-Labels:
-  __fn_multiply        = 0x0021
-  __while_1            = 0x0040
-  __else_5             = 0x0087
-  __else_3             = 0x0094
-  __else_7             = 0x00D9
-  __endwhile_2         = 0x00DC

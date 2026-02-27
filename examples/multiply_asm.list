@@ -1,9 +1,0 @@
-Assembled examples/multiply_asm.asm -> examples/multiply_asm.bin (166 bytes)
-
-Labels:
-  __fn_multiply        = 0x0021
-  __mult_loop          = 0x0045
-  no_carry_res         = 0x0065
-  skip_add             = 0x006F
-  no_carry_mc          = 0x0086
-  mc_shifted           = 0x008D
