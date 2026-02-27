@@ -9,6 +9,10 @@ import { IC74HC574 } from "../circuit/components/IC74HC574.js";
 import { IC40193 } from "../circuit/components/IC40193.js";
 import { IC74137 } from "../circuit/components/IC74137.js";
 import { IC74138 } from "../circuit/components/IC74138.js";
+import { IC6264 } from "../circuit/components/IC6264.js";
+import { IC62256 } from "../circuit/components/IC62256.js";
+import { IC28C64 } from "../circuit/components/IC28C64.js";
+import { IC28C256 } from "../circuit/components/IC28C256.js";
 import { ComponentPlacement, LayoutResult } from "./PlacementResult.js";
 import { placeBattery } from "./strategies/BatteryStrategy.js";
 import { placeButton } from "./strategies/ButtonStrategy.js";
@@ -74,6 +78,11 @@ export class Layouter {
 
     if (comp instanceof IC74137 || comp instanceof IC74138) {
       return placeDip(comp, col, 16);
+    }
+
+    if (comp instanceof IC6264 || comp instanceof IC62256 ||
+        comp instanceof IC28C64 || comp instanceof IC28C256) {
+      return placeDip(comp, col, 28);
     }
 
     console.warn(`Layouter: unknown component type for ${comp.name}`);
