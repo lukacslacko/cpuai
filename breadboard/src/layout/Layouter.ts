@@ -7,6 +7,8 @@ import { Button } from "../circuit/components/Button.js";
 import { IC74HC573 } from "../circuit/components/IC74HC573.js";
 import { IC74HC574 } from "../circuit/components/IC74HC574.js";
 import { IC40193 } from "../circuit/components/IC40193.js";
+import { IC74137 } from "../circuit/components/IC74137.js";
+import { IC74138 } from "../circuit/components/IC74138.js";
 import { ComponentPlacement, LayoutResult } from "./PlacementResult.js";
 import { placeBattery } from "./strategies/BatteryStrategy.js";
 import { placeButton } from "./strategies/ButtonStrategy.js";
@@ -67,6 +69,10 @@ export class Layouter {
     }
 
     if (comp instanceof IC40193) {
+      return placeDip(comp, col, 16);
+    }
+
+    if (comp instanceof IC74137 || comp instanceof IC74138) {
       return placeDip(comp, col, 16);
     }
 
