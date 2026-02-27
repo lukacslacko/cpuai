@@ -10,8 +10,16 @@ export class WireRenderer {
       const netId = wire.net.id;
       const idx = netWireIndex.get(netId) ?? 0;
 
-      const from = holeToWorld(wire.fromHole);
-      const to = holeToWorld(wire.toHole);
+      let from = holeToWorld(wire.fromHole);
+      let to = holeToWorld(wire.toHole);
+
+      // Snap power-rail endpoints to the grid hole's column so each wire
+      // takes the shortest (vertical) path to the rail instead of running
+      // all the way to column 1.
+      const fromIsRail = typeof wire.fromHole === "string";
+      const toIsRail = typeof wire.toHole === "string";
+      if (fromIsRail && !toIsRail) from = { x: to.x, y: from.y };
+      else if (toIsRail && !fromIsRail) to = { x: from.x, y: to.y };
 
       this._drawArcWire(ctx, from.x, from.y, to.x, to.y, wire.color, idx);
 
